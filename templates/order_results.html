@@ -52,8 +52,102 @@
         <tbody>
 
         {% for order in orders %}
-
-            <tr>
+        
+            <tr
+                class="order-row"
+                hx-get="/orders/{{ order.order_id }}/detail"
+                hx-target="#detail-{{ order.order_id }}"
+                hx-swap="innerHTML"
+                title="點擊查看訂單詳情"
+            >
+        
+                <td>
+                    <span class="order-number">
+                        #{{ order.order_id }}
+                    </span>
+                </td>
+        
+                <td>
+                    {{ order.order_time or "-" }}
+                </td>
+        
+                <td class="customer-name">
+                    {{ order.customer_name or "-" }}
+                </td>
+        
+                <td>
+                    {{ order.platform or "-" }}
+                </td>
+        
+                <td>
+                    {{ order.tracking_number or "-" }}
+                </td>
+        
+                <td>
+                    {% if order.amount_rmb is not none %}
+                        ¥{{ order.amount_rmb }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+        
+                <td>
+                    {% if order.weight_kg is not none %}
+                        {{ order.weight_kg }} kg
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+        
+                <td>
+        
+                    {% if order.order_status == "取消" %}
+        
+                        <span class="status status-cancel">
+                            取消
+                        </span>
+        
+                    {% elif order.is_returned %}
+        
+                        <span class="status status-returned">
+                            已運回
+                        </span>
+        
+                    {% elif order.is_arrived %}
+        
+                        <span class="status status-arrived">
+                            已到貨
+                        </span>
+        
+                    {% else %}
+        
+                        <span class="status status-normal">
+                            運送中
+                        </span>
+        
+                    {% endif %}
+        
+                </td>
+        
+            </tr>
+        
+        
+            <tr class="order-detail-row">
+        
+                <td colspan="8">
+        
+                    <div
+                        id="detail-{{ order.order_id }}"
+                        class="order-detail-container"
+                    ></div>
+        
+                </td>
+        
+            </tr>
+        
+        {% endfor %}
+        
+        </tbody>
 
                 <td>
                     #{{ order.order_id }}
