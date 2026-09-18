@@ -179,19 +179,58 @@ async def orders_page(request: Request):
 @app.get("/orders/search")
 async def search_orders(
     request: Request,
-    q: str = ""
+    q: str = "",
+    unreturned: str = ""
 ):
 
     q = q.strip()
 
-    if not q:
+    conditions = []
+    params = []
+
+    # 關鍵字搜尋
+    if q:
+        conditions.append("""
+            (
+                customer_name LIKE %s
+                OR tracking_number LIKE %s
+                OR CAST(order_id AS CHAR) LIKE %s
+            )
+        """)
+
+        keyword = f"%{q}%"
+
+        params.extend([
+            keyword,
+            keyword,
+            keyword
+        ])
+
+    # 只看未運回
+    if unreturned == "1":
+
+        conditions.append(
+            "COALESCE(is_returned, 0) = 0"
+        )
+
+        conditions.append(
+            "COALESCE(order_status, '正常') <> '取消'"
+        )
+
+    # 沒輸入任何條件
+    if not conditions:
+
         return templates.TemplateResponse(
             request=request,
             name="order_results.html",
             context={
-                "orders": []
+                "orders": [],
+                "total_count": 0,
+                "total_weight": 0
             }
         )
+
+    where_sql = " AND ".join(conditions)
 
     conn = get_db()
 
@@ -199,7 +238,29 @@ async def search_orders(
 
         with conn.cursor() as cursor:
 
-            sql = """
+            # 統計
+            stats_sql = f"""
+                SELECT
+                    COUNT(*) AS total_count,
+                    COALESCE(SUM(weight_kg), 0) AS total_weight
+                FROM orders
+                WHERE {where_sql}
+            """
+
+            cursor.execute(
+                stats_sql,
+                params
+            )
+
+            stats = cursor.fetchone()
+
+            total_count = stats["total_count"] or 0
+            total_weight = float(
+                stats["total_weight"] or 0
+            )
+
+            # 訂單列表
+            sql = f"""
                 SELECT
                     order_id,
                     order_time,
@@ -212,23 +273,14 @@ async def search_orders(
                     is_returned,
                     order_status
                 FROM orders
-                WHERE
-                    customer_name LIKE %s
-                    OR tracking_number LIKE %s
-                    OR CAST(order_id AS CHAR) LIKE %s
+                WHERE {where_sql}
                 ORDER BY order_id DESC
-                LIMIT 200
+                LIMIT 300
             """
-
-            keyword = f"%{q}%"
 
             cursor.execute(
                 sql,
-                (
-                    keyword,
-                    keyword,
-                    keyword
-                )
+                params
             )
 
             orders = cursor.fetchall()
@@ -240,6 +292,8 @@ async def search_orders(
         request=request,
         name="order_results.html",
         context={
-            "orders": orders
+            "orders": orders,
+            "total_count": total_count,
+            "total_weight": total_weight
         }
     )
