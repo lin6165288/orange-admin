@@ -62,3 +62,35 @@ def db_test():
             "status": "error",
             "message": str(e)
         }
+
+@app.get("/db-tables")
+def db_tables():
+    try:
+        database_url = os.environ["DATABASE_URL"]
+        url = urlparse(database_url)
+
+        conn = pymysql.connect(
+            host=url.hostname,
+            port=url.port or 3306,
+            user=unquote(url.username),
+            password=unquote(url.password),
+            database=url.path.lstrip("/"),
+            charset="utf8mb4"
+        )
+
+        with conn.cursor() as cursor:
+            cursor.execute("SHOW TABLES;")
+            tables = [row[0] for row in cursor.fetchall()]
+
+        conn.close()
+
+        return {
+            "status": "success",
+            "tables": tables
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
