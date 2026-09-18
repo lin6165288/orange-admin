@@ -43,7 +43,6 @@
 
 {% if total_count > orders|length %}
 
-
 <div class="result-header">
 
     共 {{ total_count }} 筆，
@@ -51,16 +50,13 @@
 
 </div>
 
-
 {% else %}
-
 
 <div class="result-header">
 
     共找到 {{ total_count }} 筆訂單
 
 </div>
-
 
 {% endif %}
 
@@ -75,37 +71,21 @@
 
             <tr>
 
-                <th>
-                    訂單編號
-                </th>
+                <th>訂單編號</th>
 
-                <th>
-                    日期
-                </th>
+                <th>日期</th>
 
-                <th>
-                    姓名
-                </th>
+                <th>姓名</th>
 
-                <th>
-                    平台
-                </th>
+                <th>平台</th>
 
-                <th>
-                    物流單號
-                </th>
+                <th>物流單號</th>
 
-                <th>
-                    人民幣
-                </th>
+                <th>人民幣</th>
 
-                <th>
-                    重量
-                </th>
+                <th>重量</th>
 
-                <th>
-                    狀態
-                </th>
+                <th>狀態</th>
 
             </tr>
 
@@ -119,7 +99,6 @@
 
 
             <tr
-
                 class="order-row"
 
                 hx-get="/orders/{{ order.order_id }}/detail"
@@ -128,47 +107,38 @@
 
                 hx-swap="innerHTML"
 
-                title="點擊查看訂單詳情"
+                hx-include="#search-form"
 
+                title="點擊查看訂單詳情"
             >
 
 
                 <td>
 
                     <span class="order-number">
-
                         #{{ order.order_id }}
-
                     </span>
 
                 </td>
 
 
                 <td>
-
                     {{ order.order_time or "-" }}
-
                 </td>
 
 
                 <td class="customer-name">
-
                     {{ order.customer_name or "-" }}
-
                 </td>
 
 
                 <td>
-
                     {{ order.platform or "-" }}
-
                 </td>
 
 
                 <td>
-
                     {{ order.tracking_number or "-" }}
-
                 </td>
 
 
@@ -207,41 +177,29 @@
 
                     {% if order.order_status == "取消" %}
 
-
                         <span class="status status-cancel">
-
                             取消
-
                         </span>
 
 
                     {% elif order.is_returned %}
 
-
                         <span class="status status-returned">
-
                             已運回
-
                         </span>
 
 
                     {% elif order.is_arrived %}
 
-
                         <span class="status status-arrived">
-
                             已到貨
-
                         </span>
 
 
                     {% else %}
 
-
                         <span class="status status-normal">
-
                             運送中
-
                         </span>
 
 
@@ -261,11 +219,9 @@
 
 
                     <div
-
                         id="detail-{{ order.order_id }}"
 
                         class="order-detail-container"
-
                     ></div>
 
 
