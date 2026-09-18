@@ -35,6 +35,8 @@ templates = Jinja2Templates(
 )
 
 
+
+
 @app.get("/")
 async def home(request: Request):
     return templates.TemplateResponse(
@@ -42,6 +44,8 @@ async def home(request: Request):
         name="index.html",
         context={}
     )
+
+
 
 
 @app.get("/db-test")
@@ -77,6 +81,8 @@ def db_test():
             "message": str(e)
         }
 
+
+
 @app.get("/db-tables")
 def db_tables():
     try:
@@ -108,6 +114,7 @@ def db_tables():
             "status": "error",
             "message": str(e)
         }
+
 
 
 
@@ -154,3 +161,85 @@ def db_orders_columns():
             "status": "error",
             "message": str(e)
         }
+
+
+
+
+@app.get("/orders")
+async def orders_page(request: Request):
+
+    return templates.TemplateResponse(
+        request=request,
+        name="orders.html",
+        context={}
+    )
+
+
+
+@app.get("/orders/search")
+async def search_orders(
+    request: Request,
+    q: str = ""
+):
+
+    q = q.strip()
+
+    if not q:
+        return templates.TemplateResponse(
+            request=request,
+            name="order_results.html",
+            context={
+                "orders": []
+            }
+        )
+
+    conn = get_db()
+
+    try:
+
+        with conn.cursor() as cursor:
+
+            sql = """
+                SELECT
+                    order_id,
+                    order_time,
+                    customer_name,
+                    platform,
+                    tracking_number,
+                    amount_rmb,
+                    weight_kg,
+                    is_arrived,
+                    is_returned,
+                    order_status
+                FROM orders
+                WHERE
+                    customer_name LIKE %s
+                    OR tracking_number LIKE %s
+                    OR CAST(order_id AS CHAR) LIKE %s
+                ORDER BY order_id DESC
+                LIMIT 200
+            """
+
+            keyword = f"%{q}%"
+
+            cursor.execute(
+                sql,
+                (
+                    keyword,
+                    keyword,
+                    keyword
+                )
+            )
+
+            orders = cursor.fetchall()
+
+    finally:
+        conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="order_results.html",
+        context={
+            "orders": orders
+        }
+    )
