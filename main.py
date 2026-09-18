@@ -297,3 +297,61 @@ async def search_orders(
             "total_weight": total_weight
         }
     )
+
+
+@app.get("/orders/{order_id}/detail")
+async def order_detail(
+    request: Request,
+    order_id: int
+):
+
+    conn = get_db()
+
+    try:
+
+        with conn.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT
+                    order_id,
+                    order_time,
+                    customer_name,
+                    platform,
+                    tracking_number,
+                    amount_rmb,
+                    weight_kg,
+                    is_arrived,
+                    is_returned,
+                    remarks,
+                    service_fee,
+                    early_return,
+                    is_early_returned,
+                    reconcile_enabled,
+                    exchange_rate,
+                    member_level_snapshot,
+                    original_service_fee,
+                    vip_discount_rate,
+                    final_service_fee,
+                    extra_discount,
+                    order_status,
+                    cancel_note
+                FROM orders
+                WHERE order_id = %s
+                LIMIT 1
+                """,
+                (order_id,)
+            )
+
+            order = cursor.fetchone()
+
+    finally:
+        conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="order_detail.html",
+        context={
+            "order": order
+        }
+    )
