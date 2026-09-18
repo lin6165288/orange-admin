@@ -44,11 +44,17 @@
             後台管理
         </div>
 
-        <a class="menu-item active" href="/">
+        <a
+            class="menu-item {% if request.url.path == '/' %}active{% endif %}"
+            href="/"
+        >
             ▣ 儀表板
         </a>
 
-        <a class="menu-item" href="/orders">
+        <a
+            class="menu-item {% if request.url.path.startswith('/orders') %}active{% endif %}"
+            href="/orders"
+        >
             🔍 訂單查詢
         </a>
         <a class="menu-item" href="#">
