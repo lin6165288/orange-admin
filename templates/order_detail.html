@@ -10,16 +10,12 @@
         <div>
 
             <strong>
-
                 訂單 #{{ order.order_id }}
-
             </strong>
 
 
             <span class="detail-subtitle">
-
                 {{ order.customer_name or "-" }}
-
             </span>
 
         </div>
@@ -29,7 +25,6 @@
 
 
             <button
-
                 type="button"
 
                 class="detail-edit-button"
@@ -40,15 +35,32 @@
 
                 hx-swap="innerHTML"
 
+                hx-include="#search-form"
             >
-
                 ✏️ 編輯
-
             </button>
 
 
             <button
+                type="button"
 
+                class="detail-delete-button"
+
+                hx-post="/orders/{{ order.order_id }}/delete"
+
+                hx-target="#order-results"
+
+                hx-swap="innerHTML"
+
+                hx-include="#search-form"
+
+                hx-confirm="確定要永久刪除訂單 #{{ order.order_id }} 嗎？此操作無法復原。"
+            >
+                🗑 刪除
+            </button>
+
+
+            <button
                 type="button"
 
                 class="detail-close"
@@ -58,11 +70,8 @@
                         'detail-{{ order.order_id }}'
                     ).innerHTML='';
                 "
-
             >
-
                 收起 ×
-
             </button>
 
 
@@ -82,9 +91,20 @@
             </span>
 
             <strong>
-
                 {{ order.order_time or "-" }}
+            </strong>
 
+        </div>
+
+
+        <div class="detail-item">
+
+            <span>
+                客戶姓名
+            </span>
+
+            <strong>
+                {{ order.customer_name or "-" }}
             </strong>
 
         </div>
@@ -97,9 +117,7 @@
             </span>
 
             <strong>
-
                 {{ order.platform or "-" }}
-
             </strong>
 
         </div>
@@ -112,24 +130,7 @@
             </span>
 
             <strong>
-
                 {{ order.tracking_number or "-" }}
-
-            </strong>
-
-        </div>
-
-
-        <div class="detail-item">
-
-            <span>
-                訂單狀態
-            </span>
-
-            <strong>
-
-                {{ order.order_status or "正常" }}
-
             </strong>
 
         </div>
@@ -188,9 +189,7 @@
             </span>
 
             <strong>
-
                 {{ order.exchange_rate if order.exchange_rate is not none else "-" }}
-
             </strong>
 
         </div>
@@ -203,9 +202,7 @@
             </span>
 
             <strong>
-
                 {{ order.member_level_snapshot or "-" }}
-
             </strong>
 
         </div>
@@ -241,9 +238,7 @@
             </span>
 
             <strong>
-
                 {{ order.vip_discount_rate if order.vip_discount_rate is not none else "-" }}
-
             </strong>
 
         </div>
@@ -256,9 +251,7 @@
             </span>
 
             <strong>
-
                 {{ order.extra_discount if order.extra_discount is not none else "-" }}
-
             </strong>
 
         </div>
@@ -386,35 +379,6 @@
 
     {% endif %}
 
-
-    {% if order.cancel_note %}
-
-
-    <div class="detail-note cancel-note">
-
-        <span>
-            取消原因
-        </span>
-
-        <p>
-            {{ order.cancel_note }}
-        </p>
-
-    </div>
-
-
-    {% endif %}
-
-
-</div>
-
-
-{% else %}
-
-
-<div class="detail-error">
-
-    找不到這筆訂單。
 
 </div>
 
