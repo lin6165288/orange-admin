@@ -1280,3 +1280,142 @@ body {
     }
 
 }
+
+
+/* ======================================================
+   Full Order Edit
+====================================================== */
+
+.edit-full-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.edit-status-box {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+
+    margin-top: 22px;
+
+    padding: 15px 16px;
+
+    background: white;
+
+    border:
+        1px solid #eee7df;
+
+    border-radius: 10px;
+}
+
+
+.input-prefix,
+.input-suffix {
+    display: flex;
+    align-items: center;
+
+    border:
+        1px solid #dddddd;
+
+    border-radius: 9px;
+
+    background: white;
+
+    overflow: hidden;
+}
+
+
+.input-prefix:focus-within,
+.input-suffix:focus-within {
+    border-color:
+        #f29a38;
+}
+
+
+.input-prefix span,
+.input-suffix span {
+    color: #888;
+
+    padding:
+        0 12px;
+
+    font-size:
+        14px;
+}
+
+
+.input-prefix input,
+.input-suffix input {
+    border: 0 !important;
+    border-radius: 0 !important;
+
+    flex: 1;
+}
+
+
+.edit-warning {
+    margin-top:
+        16px;
+
+    padding:
+        12px 15px;
+
+    background:
+        #fff6e8;
+
+    color:
+        #9a6a2c;
+
+    border-radius:
+        9px;
+
+    font-size:
+        12px;
+
+    line-height:
+        1.6;
+}
+
+
+/* Delete */
+
+.detail-delete-button {
+    border:
+        1px solid #efcccc;
+
+    background:
+        white;
+
+    color:
+        #c95656;
+
+    border-radius:
+        8px;
+
+    padding:
+        7px 12px;
+
+    cursor:
+        pointer;
+
+    font-size:
+        13px;
+}
+
+
+.detail-delete-button:hover {
+    background:
+        #fff1f1;
+}
+
+
+@media (max-width: 800px) {
+
+    .edit-full-grid {
+        grid-template-columns:
+            1fr;
+    }
+
+}
