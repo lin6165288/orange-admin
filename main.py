@@ -1,5 +1,7 @@
 import os
 import secrets
+from decimal import Decimal, InvalidOperation
+from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse, unquote
 
@@ -67,14 +69,11 @@ def verify_admin(
         ""
     )
 
-    # Railway 尚未設定帳密
     if not admin_username or not admin_password:
-
         raise HTTPException(
             status_code=500,
             detail="後台帳號密碼尚未設定"
         )
-
 
     correct_username = secrets.compare_digest(
         credentials.username,
@@ -86,12 +85,10 @@ def verify_admin(
         admin_password
     )
 
-
     if not (
         correct_username
         and correct_password
     ):
-
         raise HTTPException(
             status_code=401,
             detail="帳號或密碼錯誤",
@@ -99,7 +96,6 @@ def verify_admin(
                 "WWW-Authenticate": "Basic"
             }
         )
-
 
     return credentials.username
 
@@ -116,11 +112,8 @@ def get_db():
         database_url
     )
 
-
     return pymysql.connect(
-
         host=url.hostname,
-
         port=url.port or 3306,
 
         user=unquote(
@@ -138,15 +131,13 @@ def get_db():
         cursorclass=pymysql.cursors.DictCursor,
 
         connect_timeout=10,
-
         read_timeout=15,
-
         write_timeout=15
     )
 
 
 # =========================================================
-# 共用：抓取單筆訂單
+# 單筆訂單
 # =========================================================
 
 def fetch_order(
@@ -154,7 +145,6 @@ def fetch_order(
 ):
 
     conn = get_db()
-
 
     try:
 
@@ -185,21 +175,239 @@ def fetch_order(
                     extra_discount,
                     order_status,
                     cancel_note
+
                 FROM orders
+
                 WHERE order_id = %s
+
                 LIMIT 1
                 """,
+                (order_id,)
+            )
+
+            return cursor.fetchone()
+
+    finally:
+
+        conn.close()
+
+
+# =========================================================
+# 客戶姓名建議
+# =========================================================
+
+def fetch_customer_names():
+
+    conn = get_db()
+
+    try:
+
+        with conn.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT DISTINCT customer_name
+
+                FROM orders
+
+                WHERE
+                    customer_name IS NOT NULL
+                    AND customer_name <> ''
+
+                ORDER BY customer_name
+                """
+            )
+
+            rows = cursor.fetchall()
+
+            return [
+                row["customer_name"]
+                for row in rows
+            ]
+
+    finally:
+
+        conn.close()
+
+
+# =========================================================
+# 平台建議
+# =========================================================
+
+def fetch_platforms():
+
+    conn = get_db()
+
+    try:
+
+        with conn.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT DISTINCT platform
+
+                FROM orders
+
+                WHERE
+                    platform IS NOT NULL
+                    AND platform <> ''
+
+                ORDER BY platform
+                """
+            )
+
+            rows = cursor.fetchall()
+
+            return [
+                row["platform"]
+                for row in rows
+            ]
+
+    finally:
+
+        conn.close()
+
+
+# =========================================================
+# 搜尋共用函式
+# =========================================================
+
+def query_orders(
+    q: str = "",
+    unreturned: str = ""
+):
+
+    q = q.strip()
+
+    conditions = []
+
+    params = []
+
+
+    # 關鍵字
+    if q:
+
+        conditions.append(
+            """
+            (
+                customer_name LIKE %s
+                OR tracking_number LIKE %s
+                OR CAST(order_id AS CHAR) LIKE %s
+            )
+            """
+        )
+
+        keyword = f"%{q}%"
+
+        params.extend(
+            [
+                keyword,
+                keyword,
+                keyword
+            ]
+        )
+
+
+    # 未運回
+    if unreturned == "1":
+
+        conditions.append(
+            "COALESCE(is_returned, 0) = 0"
+        )
+
+        conditions.append(
+            "COALESCE(order_status, '正常') <> '取消'"
+        )
+
+
+    if not conditions:
+
+        return {
+            "orders": [],
+            "total_count": 0,
+            "total_weight": 0
+        }
+
+
+    where_sql = " AND ".join(
+        conditions
+    )
+
+    conn = get_db()
+
+    try:
+
+        with conn.cursor() as cursor:
+
+            # 統計
+            cursor.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS total_count,
+
+                    COALESCE(
+                        SUM(weight_kg),
+                        0
+                    ) AS total_weight
+
+                FROM orders
+
+                WHERE {where_sql}
+                """,
+                params
+            )
+
+            stats = cursor.fetchone()
+
+            total_count = (
+                stats["total_count"]
+                if stats
+                else 0
+            ) or 0
+
+            total_weight = float(
                 (
-                    order_id,
-                )
+                    stats["total_weight"]
+                    if stats
+                    else 0
+                ) or 0
             )
 
 
-            order = cursor.fetchone()
+            # 列表
+            cursor.execute(
+                f"""
+                SELECT
+                    order_id,
+                    order_time,
+                    customer_name,
+                    platform,
+                    tracking_number,
+                    amount_rmb,
+                    weight_kg,
+                    is_arrived,
+                    is_returned,
+                    order_status
+
+                FROM orders
+
+                WHERE {where_sql}
+
+                ORDER BY order_id DESC
+
+                LIMIT 300
+                """,
+                params
+            )
+
+            orders = cursor.fetchall()
 
 
-        return order
-
+        return {
+            "orders": orders,
+            "total_count": total_count,
+            "total_weight": total_weight
+        }
 
     finally:
 
@@ -250,195 +458,26 @@ async def orders_page(
 
 @app.get("/orders/search")
 async def search_orders(
-
     request: Request,
-
     q: str = "",
-
     unreturned: str = "",
-
     admin: str = Depends(
         verify_admin
     )
 ):
 
-    q = q.strip()
-
-
-    conditions = []
-
-    params = []
-
-
-    # -----------------------------------------------------
-    # 關鍵字
-    # -----------------------------------------------------
-
-    if q:
-
-        conditions.append(
-            """
-            (
-                customer_name LIKE %s
-                OR tracking_number LIKE %s
-                OR CAST(order_id AS CHAR) LIKE %s
-            )
-            """
-        )
-
-
-        keyword = f"%{q}%"
-
-
-        params.extend(
-            [
-                keyword,
-                keyword,
-                keyword
-            ]
-        )
-
-
-    # -----------------------------------------------------
-    # 只看未運回
-    # -----------------------------------------------------
-
-    if unreturned == "1":
-
-        conditions.append(
-            "COALESCE(is_returned, 0) = 0"
-        )
-
-        conditions.append(
-            "COALESCE(order_status, '正常') <> '取消'"
-        )
-
-
-    # -----------------------------------------------------
-    # 沒有任何條件
-    # -----------------------------------------------------
-
-    if not conditions:
-
-        return templates.TemplateResponse(
-            request=request,
-            name="order_results.html",
-            context={
-                "orders": [],
-                "total_count": 0,
-                "total_weight": 0
-            }
-        )
-
-
-    where_sql = " AND ".join(
-        conditions
+    result = query_orders(
+        q,
+        unreturned
     )
-
-
-    conn = get_db()
-
-
-    try:
-
-        with conn.cursor() as cursor:
-
-
-            # =============================================
-            # 統計
-            # =============================================
-
-            stats_sql = f"""
-                SELECT
-                    COUNT(*) AS total_count,
-                    COALESCE(
-                        SUM(weight_kg),
-                        0
-                    ) AS total_weight
-
-                FROM orders
-
-                WHERE
-                    {where_sql}
-            """
-
-
-            cursor.execute(
-                stats_sql,
-                params
-            )
-
-
-            stats = cursor.fetchone()
-
-
-            total_count = (
-                stats["total_count"]
-                if stats
-                else 0
-            ) or 0
-
-
-            total_weight = float(
-                (
-                    stats["total_weight"]
-                    if stats
-                    else 0
-                )
-                or 0
-            )
-
-
-            # =============================================
-            # 訂單列表
-            # =============================================
-
-            sql = f"""
-                SELECT
-                    order_id,
-                    order_time,
-                    customer_name,
-                    platform,
-                    tracking_number,
-                    amount_rmb,
-                    weight_kg,
-                    is_arrived,
-                    is_returned,
-                    order_status
-
-                FROM orders
-
-                WHERE
-                    {where_sql}
-
-                ORDER BY
-                    order_id DESC
-
-                LIMIT 300
-            """
-
-
-            cursor.execute(
-                sql,
-                params
-            )
-
-
-            orders = cursor.fetchall()
-
-
-    finally:
-
-        conn.close()
-
 
     return templates.TemplateResponse(
         request=request,
         name="order_results.html",
         context={
-            "orders": orders,
-            "total_count": total_count,
-            "total_weight": total_weight
+            **result,
+            "q": q,
+            "unreturned": unreturned
         }
     )
 
@@ -451,11 +490,10 @@ async def search_orders(
     "/orders/{order_id}/detail"
 )
 async def order_detail(
-
     request: Request,
-
     order_id: int,
-
+    q: str = "",
+    unreturned: str = "",
     admin: str = Depends(
         verify_admin
     )
@@ -465,7 +503,6 @@ async def order_detail(
         order_id
     )
 
-
     if not order:
 
         raise HTTPException(
@@ -473,12 +510,13 @@ async def order_detail(
             detail="找不到訂單"
         )
 
-
     return templates.TemplateResponse(
         request=request,
         name="order_detail.html",
         context={
-            "order": order
+            "order": order,
+            "q": q,
+            "unreturned": unreturned
         }
     )
 
@@ -491,11 +529,10 @@ async def order_detail(
     "/orders/{order_id}/edit"
 )
 async def edit_order_page(
-
     request: Request,
-
     order_id: int,
-
+    q: str = "",
+    unreturned: str = "",
     admin: str = Depends(
         verify_admin
     )
@@ -505,7 +542,6 @@ async def edit_order_page(
         order_id
     )
 
-
     if not order:
 
         raise HTTPException(
@@ -513,12 +549,19 @@ async def edit_order_page(
             detail="找不到訂單"
         )
 
+    customer_names = fetch_customer_names()
+
+    platforms = fetch_platforms()
 
     return templates.TemplateResponse(
         request=request,
         name="order_edit.html",
         context={
-            "order": order
+            "order": order,
+            "customer_names": customer_names,
+            "platforms": platforms,
+            "q": q,
+            "unreturned": unreturned
         }
     )
 
@@ -531,36 +574,33 @@ async def edit_order_page(
     "/orders/{order_id}/edit"
 )
 async def update_order(
-
     request: Request,
-
     order_id: int,
 
+    order_time: str = Form(""),
+    customer_name: str = Form(""),
+    platform: str = Form(""),
+    tracking_number: str = Form(""),
+
+    amount_rmb: str = Form(""),
     weight_kg: str = Form(""),
 
     remarks: str = Form(""),
 
-    is_arrived: Optional[str] = Form(
-        None
-    ),
+    is_arrived: Optional[str] = Form(None),
+    is_returned: Optional[str] = Form(None),
 
-    is_returned: Optional[str] = Form(
-        None
-    ),
+    q: str = Form(""),
+    unreturned: str = Form(""),
 
     admin: str = Depends(
         verify_admin
     )
 ):
 
-    # -----------------------------------------------------
-    # 確認訂單存在
-    # -----------------------------------------------------
-
     old_order = fetch_order(
         order_id
     )
-
 
     if not old_order:
 
@@ -570,34 +610,106 @@ async def update_order(
         )
 
 
-    # -----------------------------------------------------
-    # 重量
-    # -----------------------------------------------------
+    # =====================================================
+    # 姓名
+    # =====================================================
 
-    weight_kg = weight_kg.strip()
+    customer_name = customer_name.strip()
+
+    if not customer_name:
+
+        raise HTTPException(
+            status_code=400,
+            detail="客戶姓名不能空白"
+        )
 
 
-    if weight_kg == "":
+    # =====================================================
+    # 日期
+    # =====================================================
 
-        weight_value = None
+    order_time = order_time.strip()
 
-
-    else:
+    if order_time:
 
         try:
 
-            weight_value = float(
-                weight_kg
+            datetime.strptime(
+                order_time,
+                "%Y-%m-%d"
             )
-
 
         except ValueError:
 
             raise HTTPException(
                 status_code=400,
-                detail="重量格式錯誤"
+                detail="日期格式錯誤"
             )
 
+        order_time_value = order_time
+
+    else:
+
+        order_time_value = None
+
+
+    # =====================================================
+    # 人民幣金額
+    # =====================================================
+
+    amount_rmb = amount_rmb.strip()
+
+    if amount_rmb == "":
+
+        amount_value = None
+
+    else:
+
+        try:
+
+            amount_value = Decimal(
+                amount_rmb
+            )
+
+        except InvalidOperation:
+
+            raise HTTPException(
+                status_code=400,
+                detail="人民幣金額格式錯誤"
+            )
+
+        if amount_value < 0:
+
+            raise HTTPException(
+                status_code=400,
+                detail="人民幣金額不能小於 0"
+            )
+
+
+    # =====================================================
+    # 重量
+    # =====================================================
+
+    weight_kg = weight_kg.strip()
+
+    if weight_kg == "":
+
+        weight_value = None
+
+    else:
+
+        try:
+
+            weight_value = Decimal(
+                weight_kg
+            )
+
+        except InvalidOperation:
+
+            raise HTTPException(
+                status_code=400,
+                detail="重量格式錯誤"
+            )
 
         if weight_value < 0:
 
@@ -607,16 +719,15 @@ async def update_order(
             )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # Checkbox
-    # -----------------------------------------------------
+    # =====================================================
 
     arrived_value = (
         1
         if is_arrived == "1"
         else 0
     )
-
 
     returned_value = (
         1
@@ -625,12 +736,31 @@ async def update_order(
     )
 
 
-    # -----------------------------------------------------
+    # =====================================================
+    # 文字欄位
+    # =====================================================
+
+    platform_value = (
+        platform.strip()
+        or None
+    )
+
+    tracking_value = (
+        tracking_number.strip()
+        or None
+    )
+
+    remarks_value = (
+        remarks.strip()
+        or None
+    )
+
+
+    # =====================================================
     # Update
-    # -----------------------------------------------------
+    # =====================================================
 
     conn = get_db()
-
 
     try:
 
@@ -641,6 +771,11 @@ async def update_order(
                 UPDATE orders
 
                 SET
+                    order_time = %s,
+                    customer_name = %s,
+                    platform = %s,
+                    tracking_number = %s,
+                    amount_rmb = %s,
                     weight_kg = %s,
                     remarks = %s,
                     is_arrived = %s,
@@ -650,17 +785,103 @@ async def update_order(
                     order_id = %s
                 """,
                 (
+                    order_time_value,
+                    customer_name,
+                    platform_value,
+                    tracking_value,
+                    amount_value,
                     weight_value,
-                    remarks.strip(),
+                    remarks_value,
                     arrived_value,
                     returned_value,
                     order_id
                 )
             )
 
+        conn.commit()
+
+    except Exception:
+
+        conn.rollback()
+        raise
+
+    finally:
+
+        conn.close()
+
+
+    # 編輯後直接刷新目前搜尋結果
+    result = query_orders(
+        q,
+        unreturned
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="order_results.html",
+        context={
+            **result,
+            "q": q,
+            "unreturned": unreturned
+        }
+    )
+
+
+# =========================================================
+# Delete Order
+# =========================================================
+
+@app.post(
+    "/orders/{order_id}/delete"
+)
+async def delete_order(
+    request: Request,
+    order_id: int,
+
+    q: str = Form(""),
+    unreturned: str = Form(""),
+
+    admin: str = Depends(
+        verify_admin
+    )
+):
+
+    order = fetch_order(
+        order_id
+    )
+
+    if not order:
+
+        raise HTTPException(
+            status_code=404,
+            detail="找不到訂單"
+        )
+
+
+    conn = get_db()
+
+    try:
+
+        with conn.cursor() as cursor:
+
+            cursor.execute(
+                """
+                DELETE FROM orders
+                WHERE order_id = %s
+                """,
+                (order_id,)
+            )
 
         conn.commit()
 
+    except pymysql.err.IntegrityError:
+
+        conn.rollback()
+
+        raise HTTPException(
+            status_code=409,
+            detail="這筆訂單仍被其他資料引用，目前無法刪除"
+        )
 
     except Exception:
 
@@ -668,25 +889,22 @@ async def update_order(
 
         raise
 
-
     finally:
 
         conn.close()
 
 
-    # -----------------------------------------------------
-    # 重新讀取最新資料
-    # -----------------------------------------------------
-
-    order = fetch_order(
-        order_id
+    result = query_orders(
+        q,
+        unreturned
     )
-
 
     return templates.TemplateResponse(
         request=request,
-        name="order_detail.html",
+        name="order_results.html",
         context={
-            "order": order
+            **result,
+            "q": q,
+            "unreturned": unreturned
         }
     )
