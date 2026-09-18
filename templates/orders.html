@@ -1,91 +1,152 @@
 {% extends "base.html" %}
 
+
 {% block title %}
+
 訂單查詢｜橘貓代購
+
 {% endblock %}
+
 
 {% block content %}
 
+
 <div class="page-header">
+
     <div>
-        <h1>🔍 訂單查詢</h1>
-        <p>依姓名、訂單編號或物流單號查詢</p>
+
+        <h1>
+            🔍 訂單查詢
+        </h1>
+
+        <p>
+            依姓名、訂單編號或物流單號查詢
+        </p>
+
     </div>
+
 </div>
 
 
 <div class="search-card">
 
+
     <form
+
         hx-get="/orders/search"
+
         hx-target="#order-results"
+
         hx-trigger="submit"
+
         hx-indicator="#search-loading"
+
     >
+
 
         <div class="search-row">
 
+
             <input
+
                 type="text"
+
                 name="q"
+
                 class="search-input"
+
                 placeholder="輸入姓名、訂單編號或物流單號"
+
                 autocomplete="off"
+
             >
 
+
             <button
+
                 type="submit"
+
                 class="search-button"
+
             >
+
                 查詢
+
             </button>
+
 
         </div>
 
 
         <div class="filter-row">
 
+
             <label class="filter-check">
 
+
                 <input
+
                     type="checkbox"
+
                     name="unreturned"
+
                     value="1"
+
                 >
 
+
                 只看未運回
+
 
             </label>
 
 
             <a
+
                 href="/orders"
+
                 class="clear-filter"
+
             >
+
                 清除條件
+
             </a>
 
+
         </div>
+
 
     </form>
 
 
     <div
+
         id="search-loading"
+
         class="htmx-indicator"
+
     >
+
         查詢中...
+
     </div>
+
 
 </div>
 
 
 <div id="order-results">
 
+
     <div class="empty-state">
+
         輸入姓名、訂單編號或物流單號開始查詢
+
     </div>
 
+
 </div>
+
 
 {% endblock %}
