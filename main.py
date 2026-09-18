@@ -94,3 +94,49 @@ def db_tables():
             "status": "error",
             "message": str(e)
         }
+
+
+
+@app.get("/db-orders-columns")
+def db_orders_columns():
+    try:
+        database_url = os.environ["DATABASE_URL"]
+        url = urlparse(database_url)
+
+        conn = pymysql.connect(
+            host=url.hostname,
+            port=url.port or 3306,
+            user=unquote(url.username),
+            password=unquote(url.password),
+            database=url.path.lstrip("/"),
+            charset="utf8mb4"
+        )
+
+        with conn.cursor() as cursor:
+            cursor.execute("SHOW COLUMNS FROM orders;")
+            columns = cursor.fetchall()
+
+        conn.close()
+
+        result = []
+
+        for col in columns:
+            result.append({
+                "field": col[0],
+                "type": col[1],
+                "null": col[2],
+                "key": col[3],
+                "default": col[4],
+                "extra": col[5]
+            })
+
+        return {
+            "status": "success",
+            "columns": result
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
