@@ -2,9 +2,7 @@
 
 
 {% block title %}
-
 訂單查詢｜橘貓代購
-
 {% endblock %}
 
 
@@ -32,6 +30,7 @@
 
 
     <form
+        id="search-form"
 
         hx-get="/orders/search"
 
@@ -40,7 +39,6 @@
         hx-trigger="submit"
 
         hx-indicator="#search-loading"
-
     >
 
 
@@ -48,7 +46,6 @@
 
 
             <input
-
                 type="text"
 
                 name="q"
@@ -58,20 +55,15 @@
                 placeholder="輸入姓名、訂單編號或物流單號"
 
                 autocomplete="off"
-
             >
 
 
             <button
-
                 type="submit"
 
                 class="search-button"
-
             >
-
                 查詢
-
             </button>
 
 
@@ -83,34 +75,25 @@
 
             <label class="filter-check">
 
-
                 <input
-
                     type="checkbox"
 
                     name="unreturned"
 
                     value="1"
-
                 >
 
-
                 只看未運回
-
 
             </label>
 
 
             <a
-
                 href="/orders"
 
                 class="clear-filter"
-
             >
-
                 清除條件
-
             </a>
 
 
@@ -121,15 +104,11 @@
 
 
     <div
-
         id="search-loading"
 
         class="htmx-indicator"
-
     >
-
         查詢中...
-
     </div>
 
 
