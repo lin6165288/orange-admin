@@ -7,23 +7,18 @@
         <div>
 
             <strong>
-
                 編輯訂單 #{{ order.order_id }}
-
             </strong>
 
 
             <span class="detail-subtitle">
-
                 {{ order.customer_name or "-" }}
-
             </span>
 
         </div>
 
 
         <button
-
             type="button"
 
             class="detail-close"
@@ -34,10 +29,9 @@
 
             hx-swap="innerHTML"
 
+            hx-include="#search-form"
         >
-
             取消 ×
-
         </button>
 
 
@@ -45,99 +39,245 @@
 
 
     <form
-
         hx-post="/orders/{{ order.order_id }}/edit"
 
-        hx-target="#detail-{{ order.order_id }}"
+        hx-target="#order-results"
 
         hx-swap="innerHTML"
-
     >
 
 
-        <div class="edit-grid">
+        <input
+            type="hidden"
 
+            name="q"
+
+            value="{{ q }}"
+        >
+
+
+        <input
+            type="hidden"
+
+            name="unreturned"
+
+            value="{{ unreturned }}"
+        >
+
+
+        <div class="edit-full-grid">
+
+
+            <!-- 日期 -->
 
             <div class="edit-field">
 
-
                 <label>
-
-                    重量（kg）
-
+                    下單日期
                 </label>
 
+                <input
+                    type="date"
+
+                    name="order_time"
+
+                    value="{{ order.order_time or '' }}"
+                >
+
+            </div>
+
+
+            <!-- 姓名 -->
+
+            <div class="edit-field">
+
+                <label>
+                    客戶姓名
+                </label>
 
                 <input
+                    type="text"
 
-                    type="number"
+                    name="customer_name"
 
-                    name="weight_kg"
+                    list="customer-name-list"
 
-                    value="{{ order.weight_kg if order.weight_kg is not none else '' }}"
+                    value="{{ order.customer_name or '' }}"
 
-                    min="0"
-
-                    step="0.01"
-
+                    required
                 >
 
 
+                <datalist id="customer-name-list">
+
+                    {% for name in customer_names %}
+
+                        <option value="{{ name }}">
+
+                    {% endfor %}
+
+                </datalist>
+
+            </div>
+
+
+            <!-- 平台 -->
+
+            <div class="edit-field">
+
+                <label>
+                    平台
+                </label>
+
+                <input
+                    type="text"
+
+                    name="platform"
+
+                    list="platform-list"
+
+                    value="{{ order.platform or '' }}"
+                >
+
+
+                <datalist id="platform-list">
+
+                    {% for platform in platforms %}
+
+                        <option value="{{ platform }}">
+
+                    {% endfor %}
+
+                </datalist>
+
             </div>
 
 
-            <div class="edit-check-group">
+            <!-- 物流 -->
 
+            <div class="edit-field">
 
-                <label class="edit-checkbox">
-
-
-                    <input
-
-                        type="checkbox"
-
-                        name="is_arrived"
-
-                        value="1"
-
-                        {% if order.is_arrived %}
-                        checked
-                        {% endif %}
-
-                    >
-
-
-                    已到貨
-
-
+                <label>
+                    物流單號
                 </label>
 
+                <input
+                    type="text"
 
-                <label class="edit-checkbox">
+                    name="tracking_number"
 
+                    value="{{ order.tracking_number or '' }}"
 
-                    <input
-
-                        type="checkbox"
-
-                        name="is_returned"
-
-                        value="1"
-
-                        {% if order.is_returned %}
-                        checked
-                        {% endif %}
-
-                    >
-
-
-                    已運回
-
-
-                </label>
-
+                    autocomplete="off"
+                >
 
             </div>
+
+
+            <!-- RMB -->
+
+            <div class="edit-field">
+
+                <label>
+                    人民幣金額
+                </label>
+
+                <div class="input-prefix">
+
+                    <span>
+                        ¥
+                    </span>
+
+                    <input
+                        type="number"
+
+                        name="amount_rmb"
+
+                        value="{{ order.amount_rmb if order.amount_rmb is not none else '' }}"
+
+                        min="0"
+
+                        step="0.01"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <!-- Weight -->
+
+            <div class="edit-field">
+
+                <label>
+                    重量
+                </label>
+
+                <div class="input-suffix">
+
+                    <input
+                        type="number"
+
+                        name="weight_kg"
+
+                        value="{{ order.weight_kg if order.weight_kg is not none else '' }}"
+
+                        min="0"
+
+                        step="0.01"
+                    >
+
+                    <span>
+                        kg
+                    </span>
+
+                </div>
+
+            </div>
+
+
+        </div>
+
+
+        <div class="edit-status-box">
+
+
+            <label class="edit-checkbox">
+
+                <input
+                    type="checkbox"
+
+                    name="is_arrived"
+
+                    value="1"
+
+                    {% if order.is_arrived %}
+                    checked
+                    {% endif %}
+                >
+
+                已到貨
+
+            </label>
+
+
+            <label class="edit-checkbox">
+
+                <input
+                    type="checkbox"
+
+                    name="is_returned"
+
+                    value="1"
+
+                    {% if order.is_returned %}
+                    checked
+                    {% endif %}
+                >
+
+                已運回
+
+            </label>
 
 
         </div>
@@ -147,22 +287,26 @@
 
 
             <label>
-
                 備註
-
             </label>
 
 
             <textarea
-
                 name="remarks"
 
                 rows="4"
 
                 placeholder="輸入訂單備註"
-
             >{{ order.remarks or "" }}</textarea>
 
+
+        </div>
+
+
+        <div class="edit-warning">
+
+            ※ 修改人民幣金額目前不會自動重新計算手續費，
+            原本的手續費資料會保留。
 
         </div>
 
@@ -171,7 +315,6 @@
 
 
             <button
-
                 type="button"
 
                 class="edit-cancel"
@@ -182,23 +325,18 @@
 
                 hx-swap="innerHTML"
 
+                hx-include="#search-form"
             >
-
                 取消
-
             </button>
 
 
             <button
-
                 type="submit"
 
                 class="edit-save"
-
             >
-
                 儲存變更
-
             </button>
 
 
