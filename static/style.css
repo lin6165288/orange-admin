@@ -384,3 +384,168 @@ body {
     }
 
 }
+
+
+/* Clickable order row */
+
+.order-row {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.order-row:hover {
+    background: #fffaf3;
+}
+
+.order-number {
+    font-weight: 600;
+    color: #e9861d;
+}
+
+
+/* Detail row */
+
+.order-detail-row td {
+    padding: 0 !important;
+    border-top: 0 !important;
+}
+
+.order-detail-container:empty {
+    display: none;
+}
+
+
+/* Detail card */
+
+.order-detail-card {
+    margin: 0 14px 18px;
+    padding: 22px;
+    background: #fffaf3;
+    border: 1px solid #f2dfc6;
+    border-radius: 14px;
+}
+
+.detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.detail-header strong {
+    font-size: 18px;
+}
+
+.detail-subtitle {
+    margin-left: 10px;
+    color: #888;
+    font-size: 14px;
+}
+
+.detail-close {
+    border: 0;
+    background: transparent;
+    color: #999;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.detail-close:hover {
+    color: #e9861d;
+}
+
+
+/* Detail grid */
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.detail-item {
+    background: white;
+    border: 1px solid #eee7df;
+    border-radius: 10px;
+    padding: 13px 15px;
+}
+
+.detail-item span {
+    display: block;
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 5px;
+}
+
+.detail-item strong {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+
+/* Status */
+
+.detail-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.detail-status {
+    padding: 6px 11px;
+    background: #eeeeee;
+    color: #999;
+    border-radius: 999px;
+    font-size: 12px;
+}
+
+.detail-status.yes {
+    background: #e7f7ed;
+    color: #328652;
+}
+
+
+/* Notes */
+
+.detail-note {
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: white;
+    border-radius: 10px;
+    border: 1px solid #eee7df;
+}
+
+.detail-note span {
+    font-size: 12px;
+    color: #999;
+}
+
+.detail-note p {
+    margin: 7px 0 0;
+    white-space: pre-wrap;
+    font-size: 14px;
+}
+
+.cancel-note {
+    background: #fff3f3;
+}
+
+
+/* Mobile */
+
+@media (max-width: 1000px) {
+
+    .detail-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+}
+
+@media (max-width: 600px) {
+
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+
+}
