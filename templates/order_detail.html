@@ -1,0 +1,178 @@
+{% if order %}
+
+<div class="order-detail-card">
+
+    <div class="detail-header">
+
+        <div>
+            <strong>訂單 #{{ order.order_id }}</strong>
+            <span class="detail-subtitle">
+                {{ order.customer_name or "-" }}
+            </span>
+        </div>
+
+        <button
+            type="button"
+            class="detail-close"
+            onclick="
+                document.getElementById('detail-{{ order.order_id }}').innerHTML='';
+            "
+        >
+            收起 ×
+        </button>
+
+    </div>
+
+
+    <div class="detail-grid">
+
+        <div class="detail-item">
+            <span>下單日期</span>
+            <strong>{{ order.order_time or "-" }}</strong>
+        </div>
+
+        <div class="detail-item">
+            <span>平台</span>
+            <strong>{{ order.platform or "-" }}</strong>
+        </div>
+
+        <div class="detail-item">
+            <span>物流單號</span>
+            <strong>{{ order.tracking_number or "-" }}</strong>
+        </div>
+
+        <div class="detail-item">
+            <span>訂單狀態</span>
+            <strong>{{ order.order_status or "正常" }}</strong>
+        </div>
+
+
+        <div class="detail-item">
+            <span>人民幣金額</span>
+            <strong>
+                {% if order.amount_rmb is not none %}
+                    ¥{{ order.amount_rmb }}
+                {% else %}
+                    -
+                {% endif %}
+            </strong>
+        </div>
+
+        <div class="detail-item">
+            <span>重量</span>
+            <strong>
+                {% if order.weight_kg is not none %}
+                    {{ order.weight_kg }} kg
+                {% else %}
+                    -
+                {% endif %}
+            </strong>
+        </div>
+
+        <div class="detail-item">
+            <span>人民幣匯率</span>
+            <strong>
+                {{ order.exchange_rate if order.exchange_rate is not none else "-" }}
+            </strong>
+        </div>
+
+        <div class="detail-item">
+            <span>會員等級</span>
+            <strong>
+                {{ order.member_level_snapshot or "-" }}
+            </strong>
+        </div>
+
+
+        <div class="detail-item">
+            <span>原始手續費</span>
+            <strong>
+                {% if order.original_service_fee is not none %}
+                    NT$ {{ order.original_service_fee }}
+                {% else %}
+                    -
+                {% endif %}
+            </strong>
+        </div>
+
+        <div class="detail-item">
+            <span>VIP 折扣率</span>
+            <strong>
+                {{ order.vip_discount_rate if order.vip_discount_rate is not none else "-" }}
+            </strong>
+        </div>
+
+        <div class="detail-item">
+            <span>額外折扣</span>
+            <strong>
+                {{ order.extra_discount if order.extra_discount is not none else "-" }}
+            </strong>
+        </div>
+
+        <div class="detail-item">
+            <span>最終手續費</span>
+            <strong>
+                {% if order.final_service_fee is not none %}
+                    NT$ {{ order.final_service_fee }}
+                {% else %}
+                    -
+                {% endif %}
+            </strong>
+        </div>
+
+    </div>
+
+
+    <div class="detail-status-row">
+
+        <span class="detail-status {% if order.is_arrived %}yes{% endif %}">
+            {% if order.is_arrived %}✓{% else %}✕{% endif %}
+            已到貨
+        </span>
+
+        <span class="detail-status {% if order.is_returned %}yes{% endif %}">
+            {% if order.is_returned %}✓{% else %}✕{% endif %}
+            已運回
+        </span>
+
+        <span class="detail-status {% if order.is_early_returned %}yes{% endif %}">
+            {% if order.is_early_returned %}✓{% else %}✕{% endif %}
+            提前運回
+        </span>
+
+        <span class="detail-status {% if order.reconcile_enabled %}yes{% endif %}">
+            {% if order.reconcile_enabled %}✓{% else %}✕{% endif %}
+            對帳
+        </span>
+
+    </div>
+
+
+    {% if order.remarks %}
+
+    <div class="detail-note">
+        <span>備註</span>
+        <p>{{ order.remarks }}</p>
+    </div>
+
+    {% endif %}
+
+
+    {% if order.cancel_note %}
+
+    <div class="detail-note cancel-note">
+        <span>取消原因</span>
+        <p>{{ order.cancel_note }}</p>
+    </div>
+
+    {% endif %}
+
+</div>
+
+{% else %}
+
+<div class="detail-error">
+    找不到這筆訂單。
+</div>
+
+{% endif %}
