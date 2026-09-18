@@ -6,6 +6,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 
+def get_db():
+    database_url = os.environ["DATABASE_URL"]
+    url = urlparse(database_url)
+
+    return pymysql.connect(
+        host=url.hostname,
+        port=url.port or 3306,
+        user=unquote(url.username),
+        password=unquote(url.password),
+        database=url.path.lstrip("/"),
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
 app = FastAPI(
     title="橘貓代購後台"
 )
