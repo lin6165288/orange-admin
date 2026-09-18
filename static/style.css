@@ -304,3 +304,83 @@ body {
 .htmx-request.htmx-indicator {
     display: block;
 }
+
+
+/* Search filters */
+
+.filter-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 15px;
+}
+
+.filter-check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 14px;
+    color: #555;
+    cursor: pointer;
+}
+
+.filter-check input {
+    width: 17px;
+    height: 17px;
+    accent-color: #f29a38;
+}
+
+.clear-filter {
+    color: #999;
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.clear-filter:hover {
+    color: #f29a38;
+}
+
+
+/* Result statistics */
+
+.result-summary {
+    display: flex;
+    gap: 15px;
+    margin-top: 25px;
+}
+
+.summary-card {
+    background: white;
+    border: 1px solid #eeeeee;
+    border-radius: 14px;
+    padding: 16px 22px;
+    min-width: 170px;
+}
+
+.summary-card span {
+    display: block;
+    color: #888;
+    font-size: 13px;
+    margin-bottom: 5px;
+}
+
+.summary-card strong {
+    font-size: 24px;
+    margin-right: 4px;
+}
+
+.summary-card small {
+    color: #888;
+}
+
+@media (max-width: 768px) {
+
+    .result-summary {
+        flex-direction: column;
+    }
+
+    .summary-card {
+        width: 100%;
+    }
+
+}
