@@ -1,8 +1,36 @@
 {% if orders %}
 
-<div class="result-header">
-    共找到 {{ orders|length }} 筆訂單
+<div class="result-summary">
+
+    <div class="summary-card">
+        <span>符合訂單</span>
+        <strong>{{ total_count }}</strong>
+        <small>筆</small>
+    </div>
+
+    <div class="summary-card">
+        <span>總重量</span>
+        <strong>{{ "%.2f"|format(total_weight) }}</strong>
+        <small>kg</small>
+    </div>
+
 </div>
+
+{% if total_count > orders|length %}
+
+<div class="result-header">
+    共 {{ total_count }} 筆，目前顯示最近 {{ orders|length }} 筆
+</div>
+
+{% else %}
+
+<div class="result-header">
+    共找到 {{ total_count }} 筆訂單
+</div>
+
+{% endif %}
+
+
 
 <div class="table-card">
 
