@@ -39,7 +39,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/style.css?v=8"
+        href="/static/style.css?v=11"
     >
 
 </head>
@@ -153,6 +153,18 @@
 
             💬 匿名回饋
 
+        </a>
+
+
+        <a
+            class="menu-item
+            {% if request.url.path.startswith('/audit-logs') %}
+            active
+            {% endif %}"
+        
+            href="/audit-logs"
+        >
+            🕘 操作紀錄
         </a>
 
 
