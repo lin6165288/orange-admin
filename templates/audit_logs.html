@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+
+{% block title %}
+操作紀錄｜橘貓代購
+{% endblock %}
+
+
+{% block content %}
+
+
+<div class="page-header">
+
+    <div>
+
+        <h1>
+            🕘 操作紀錄
+        </h1>
+
+        <p>
+            訂單修改與刪除歷史
+        </p>
+
+    </div>
+
+</div>
+
+
+<div class="audit-list">
+
+
+{% if logs %}
+
+
+    {% for log in logs %}
+
+
+        <div class="audit-card">
+
+
+            <div class="audit-header">
+
+
+                <div>
+
+
+                    {% if log.action == "DELETE" %}
+
+                        <span class="audit-action audit-delete">
+                            刪除
+                        </span>
+
+                    {% else %}
+
+                        <span class="audit-action audit-update">
+                            修改
+                        </span>
+
+                    {% endif %}
+
+
+                    <strong>
+                        訂單 #{{ log.order_id }}
+                    </strong>
+
+
+                </div>
+
+
+                <div class="audit-meta">
+
+                    {{ log.created_at }}
+
+                    ·
+
+                    {{ log.admin_username }}
+
+                </div>
+
+
+            </div>
+
+
+            {% if log.action == "UPDATE" %}
+
+
+                {% if log.changes %}
+
+
+                    <div class="audit-changes">
+
+
+                        {% for change in log.changes %}
+
+
+                            <div class="audit-change-row">
+
+
+                                <div class="audit-label">
+
+                                    {{ change.label }}
+
+                                </div>
+
+
+                                <div class="audit-before">
+
+                                    {{ change.before }}
+
+                                </div>
+
+
+                                <div class="audit-arrow">
+
+                                    →
+
+                                </div>
+
+
+                                <div class="audit-after">
+
+                                    {{ change.after }}
+
+                                </div>
+
+
+                            </div>
+
+
+                        {% endfor %}
+
+
+                    </div>
+
+
+                {% else %}
+
+
+                    <div class="audit-empty">
+
+                        此次儲存沒有實際欄位變更
+
+                    </div>
+
+
+                {% endif %}
+
+
+            {% elif log.action == "DELETE" %}
+
+
+                <div class="deleted-order-summary">
+
+
+                    <div>
+
+                        <span>
+                            客戶
+                        </span>
+
+                        <strong>
+                            {{ log.before.get("customer_name", "—") }}
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <span>
+                            日期
+                        </span>
+
+                        <strong>
+                            {{ log.before.get("order_time", "—") }}
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <span>
+                            平台
+                        </span>
+
+                        <strong>
+                            {{ log.before.get("platform", "—") }}
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <span>
+                            物流單號
+                        </span>
+
+                        <strong>
+                            {{ log.before.get("tracking_number", "—") or "—" }}
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <span>
+                            人民幣
+                        </span>
+
+                        <strong>
+                            ¥{{ log.before.get("amount_rmb", "—") }}
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <span>
+                            重量
+                        </span>
+
+                        <strong>
+                            {{ log.before.get("weight_kg", "—") }} kg
+                        </strong>
+
+                    </div>
+
+
+                </div>
+
+
+                <details class="audit-details">
+
+                    <summary>
+                        查看被刪除訂單完整資料
+                    </summary>
+
+                    <pre>{{ log.before | tojson(indent=2) }}</pre>
+
+                </details>
+
+
+            {% endif %}
+
+
+        </div>
+
+
+    {% endfor %}
+
+
+{% else %}
+
+
+    <div class="empty-state">
+
+        目前還沒有操作紀錄
+
+    </div>
+
+
+{% endif %}
+
+
+</div>
+
+
+{% endblock %}
