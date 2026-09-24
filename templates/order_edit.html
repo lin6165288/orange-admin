@@ -44,31 +44,13 @@
         hx-target="#order-results"
 
         hx-swap="innerHTML"
+
+        hx-include="#search-form"
     >
-
-
-        <input
-            type="hidden"
-
-            name="q"
-
-            value="{{ q }}"
-        >
-
-
-        <input
-            type="hidden"
-
-            name="unreturned"
-
-            value="{{ unreturned }}"
-        >
 
 
         <div class="edit-full-grid">
 
-
-            <!-- 日期 -->
 
             <div class="edit-field">
 
@@ -86,8 +68,6 @@
 
             </div>
 
-
-            <!-- 姓名 -->
 
             <div class="edit-field">
 
@@ -121,8 +101,6 @@
             </div>
 
 
-            <!-- 平台 -->
-
             <div class="edit-field">
 
                 <label>
@@ -153,8 +131,6 @@
             </div>
 
 
-            <!-- 物流 -->
-
             <div class="edit-field">
 
                 <label>
@@ -174,13 +150,12 @@
             </div>
 
 
-            <!-- RMB -->
-
             <div class="edit-field">
 
                 <label>
                     人民幣金額
                 </label>
+
 
                 <div class="input-prefix">
 
@@ -205,13 +180,12 @@
             </div>
 
 
-            <!-- Weight -->
-
             <div class="edit-field">
 
                 <label>
                     重量
                 </label>
+
 
                 <div class="input-suffix">
 
@@ -306,7 +280,7 @@
         <div class="edit-warning">
 
             ※ 修改人民幣金額目前不會自動重新計算手續費，
-            原本的手續費資料會保留。
+            原本手續費資料會保留。
 
         </div>
 
