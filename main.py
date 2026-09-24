@@ -1949,14 +1949,19 @@ def new_order_page_context(**updates):
     conn = get_db()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT customer_name FROM members WHERE customer_name IS NOT NULL "
-                "AND TRIM(customer_name) <> '' "
-                "UNION SELECT DISTINCT customer_name FROM orders "
-                "WHERE customer_name IS NOT NULL AND TRIM(customer_name) <> '' "
-                "ORDER BY customer_name"
-            )
-            context["customer_names"] = [r["customer_name"] for r in cursor.fetchall()]
+            # members 與 orders 的 customer_name 可能使用不同 collation；
+            # 不在 SQL 用 UNION 合併，以免 MySQL 1271 Illegal mix of collations。
+            names = set()
+            for source in ("members", "orders"):
+                cursor.execute(
+                    f"SELECT DISTINCT customer_name FROM {source} "
+                    "WHERE customer_name IS NOT NULL AND TRIM(customer_name) <> ''"
+                )
+                names.update(
+                    row["customer_name"] for row in cursor.fetchall()
+                    if row.get("customer_name")
+                )
+            context["customer_names"] = sorted(names)
             context["member_level"] = member_level_for_name(cursor, context["customer_name"])
     finally:
         conn.close()
