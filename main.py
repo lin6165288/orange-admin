@@ -5,7 +5,7 @@ import threading
 import logging
 import re
 
-from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN, ROUND_CEILING
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -626,6 +626,9 @@ AUDIT_FIELD_LABELS = {
 
     "is_returned":
         "已運回",
+
+    "is_early_returned":
+        "提前運回",
 
     "exchange_rate":
         "人民幣匯率",
@@ -2424,3 +2427,265 @@ def inbound_delete_failed(request: Request, queue_id: int,
     return templates.TemplateResponse(request=request, name="inbound_body.html",
                                       context=inbound_page_context(
                                           result={"error": "", "rows": [], "message": "佇列項目已刪除"}))
+
+# =========================================================
+# 出貨管理：可出貨名單／姓名批次處理（保留舊 Streamlit 的備註標記）
+# =========================================================
+
+SHIPPING_DELAY_TAG = "[延後]"
+SHIPPING_NOTIFY_TAG = "[已通知]"
+SHIPPING_ACTIONS = {
+    "returned": "標記已運回",
+    "early": "標記提前運回",
+    "delay": "延後運回",
+    "undelay": "取消延後",
+    "notify": "標記已通知",
+    "unnotify": "取消已通知",
+}
+
+
+def shipping_rows(mode="ready", customer="", hide_delayed=False, hide_notified=False):
+    """第一版以當前訂單快照產生名單；不會自動變更訂單。"""
+    mode = mode if mode in ("ready", "customer") else "ready"
+    customer = str(customer or "").strip()
+    if len(customer) > 50:
+        customer = customer[:50]
+    if mode == "customer" and not customer:
+        return [], 0
+
+    ready_filter = """
+        COALESCE(o.is_arrived, 0) = 1
+        AND (
+            COALESCE(o.is_early_returned, 0) = 1
+            OR NOT EXISTS (
+                SELECT 1 FROM orders pending
+                WHERE pending.customer_name = o.customer_name
+                  AND COALESCE(pending.is_arrived, 0) = 0
+                  AND COALESCE(pending.is_returned, 0) = 0
+                  AND COALESCE(pending.order_status, '正常') <> '取消'
+            )
+        )
+    """
+    where = [
+        "COALESCE(o.is_returned, 0) = 0",
+        "COALESCE(o.order_status, '正常') <> '取消'",
+        "o.customer_name IS NOT NULL",
+        "TRIM(o.customer_name) <> ''",
+    ]
+    params = []
+    if mode == "ready":
+        where.append(f"({ready_filter})")
+    else:
+        where.append("o.customer_name LIKE %s")
+        params.append(f"%{customer}%")
+    if hide_delayed:
+        where.append("(o.remarks IS NULL OR o.remarks NOT LIKE %s)")
+        params.append(f"%{SHIPPING_DELAY_TAG}%")
+    if hide_notified:
+        where.append("(o.remarks IS NULL OR o.remarks NOT LIKE %s)")
+        params.append(f"%{SHIPPING_NOTIFY_TAG}%")
+    condition = " AND ".join(where)
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""SELECT o.order_id, o.order_time, o.customer_name, o.platform,
+                           o.tracking_number, o.weight_kg, o.is_arrived,
+                           o.is_returned, o.is_early_returned, o.remarks
+                    FROM orders o WHERE {condition}
+                    ORDER BY o.customer_name, o.order_id DESC LIMIT 501""",
+                params,
+            )
+            all_rows = cursor.fetchall()
+    finally:
+        conn.close()
+    has_more = len(all_rows) > 500
+    rows = [row for row in all_rows[:500] if not row.get("is_returned")]
+    for row in rows:
+        note = str(row.get("remarks") or "")
+        row["delayed"] = SHIPPING_DELAY_TAG in note
+        row["notified"] = SHIPPING_NOTIFY_TAG in note
+        row["weight_num"] = float(row.get("weight_kg") or 0)
+    return rows, int(has_more)
+
+
+def shipping_billable_weight(weight, kind):
+    """每位客戶、每一種包裹分類合併重量後，以 0.5 kg 進位。"""
+    weight = max(Decimal("0"), Decimal(str(weight or 0)))
+    if weight == 0:
+        # 未記重的訂單不估運費，避免將未知重量視為已知費用。
+        return Decimal("0")
+    rounded = (weight / Decimal("0.5")).to_integral_value(rounding=ROUND_CEILING) * Decimal("0.5")
+    return max(Decimal("1.0"), rounded) if kind == "forwarding" else max(Decimal("0.5"), rounded)
+
+
+def shipping_fee_breakdown(rows):
+    """同一客戶分成純集運/代購兩池，各自合重計費；不同客戶分別進位。"""
+    grouped = {}
+    for row in rows:
+        if row.get("is_returned") or row.get("order_status") == "取消":
+            continue
+        name = row["customer_name"]
+        g = grouped.setdefault(name, {
+            "name": name, "count": 0, "weight": Decimal("0"),
+            "forwarding_count": 0, "forwarding_weight": Decimal("0"),
+            "purchase_count": 0, "purchase_weight": Decimal("0"),
+        })
+        kind = "forwarding" if row.get("platform") == "集運" else "purchase"
+        weight = max(Decimal("0"), Decimal(str(row.get("weight_kg") or 0)))
+        g["count"] += 1
+        g["weight"] += weight
+        g[f"{kind}_count"] += 1
+        g[f"{kind}_weight"] += weight
+
+    groups = []
+    for g in grouped.values():
+        g["forwarding_billed_weight"] = shipping_billable_weight(g["forwarding_weight"], "forwarding")
+        g["purchase_billed_weight"] = shipping_billable_weight(g["purchase_weight"], "purchase")
+        g["forwarding_fee"] = g["forwarding_billed_weight"] * Decimal("90")
+        g["purchase_fee"] = g["purchase_billed_weight"] * Decimal("70")
+        g["total_fee"] = g["forwarding_fee"] + g["purchase_fee"]
+        groups.append(g)
+    return groups
+
+
+def shipping_context(mode="ready", customer="", hide_delayed="", hide_notified="", message="", error=""):
+    mode = mode if mode in ("ready", "customer") else "ready"
+    customer = str(customer or "").strip()[:50]
+    hide_delayed = str(hide_delayed or "") == "1"
+    hide_notified = str(hide_notified or "") == "1"
+    rows, has_more = shipping_rows(mode, customer, hide_delayed, hide_notified)
+    # 已運回訂單不進可選取清單、不計重量或運費（SQL 亦已排除）。
+    rows = [row for row in rows if not row.get("is_returned")]
+    total_weight = sum((max(Decimal("0"), Decimal(str(row.get("weight_kg") or 0))) for row in rows), Decimal("0"))
+    groups = shipping_fee_breakdown(rows)
+    total_fee = sum((g["total_fee"] for g in groups), Decimal("0"))
+    return {
+        "mode": mode,
+        "customer": customer,
+        "hide_delayed": hide_delayed,
+        "hide_notified": hide_notified,
+        "rows": rows,
+        "count": len(rows),
+        "total_weight": total_weight,
+        "total_fee": total_fee,
+        "groups": groups,
+        "has_more": bool(has_more),
+        "message": message,
+        "error": error,
+        "actions": SHIPPING_ACTIONS,
+    }
+
+
+def _shipping_update_text(remarks, action):
+    before = str(remarks or "")
+    if action == "delay" or action == "notify":
+        tag = SHIPPING_DELAY_TAG if action == "delay" else SHIPPING_NOTIFY_TAG
+        return before if tag in before else (before + " " + tag).strip()
+    if action == "undelay" or action == "unnotify":
+        tag = SHIPPING_DELAY_TAG if action == "undelay" else SHIPPING_NOTIFY_TAG
+        return before.replace(tag, "").strip()
+    return before
+
+
+def apply_shipping_action(order_ids, action, admin, mode="ready", customer="",
+                          hide_delayed=False, hide_notified=False):
+    """一批訂單同 transaction；無變更不寫 log。出錯時整批回滾。"""
+    if action not in SHIPPING_ACTIONS:
+        raise HTTPException(status_code=422, detail="無效的出貨操作")
+    if len(order_ids) != len(set(order_ids)) or not 1 <= len(order_ids) <= 100:
+        raise HTTPException(status_code=422, detail="每批請選擇 1～100 筆不重複訂單")
+    if any(oid <= 0 for oid in order_ids):
+        raise HTTPException(status_code=422, detail="訂單編號不正確")
+    if mode not in ("ready", "customer"):
+        raise HTTPException(status_code=422, detail="出貨模式不正確")
+    # 限制提交的訂單必須出現在本次查詢範圍，避免改造表單跨客戶批次操作。
+    visible, truncated = shipping_rows(mode, customer, hide_delayed, hide_notified)
+    allowed = {row["order_id"] for row in visible}
+    if not set(order_ids).issubset(allowed):
+        raise HTTPException(status_code=409, detail="訂單名單已變動，請刷新列表後重新勾選")
+    ensure_audit_storage()
+    conn = get_db()
+    changed = 0
+    try:
+        with conn.cursor() as cursor:
+            keys = sorted(order_ids)
+            placeholders = ",".join(["%s"] * len(keys))
+            cursor.execute(
+                f"SELECT * FROM orders WHERE order_id IN ({placeholders}) ORDER BY order_id FOR UPDATE",
+                keys,
+            )
+            before_rows = cursor.fetchall()
+            if len(before_rows) != len(keys):
+                raise HTTPException(status_code=409, detail="部分訂單已不存在，請重新查詢")
+            for old in before_rows:
+                oid = old["order_id"]
+                if old.get("order_status") == "取消" or old.get("is_returned"):
+                    raise HTTPException(status_code=409, detail=f"#{oid} 已取消或已運回，整批未更動")
+                if action == "returned":
+                    if not old.get("is_arrived"):
+                        raise HTTPException(status_code=409, detail=f"#{oid} 尚未到貨，整批未更動")
+                    if SHIPPING_DELAY_TAG in str(old.get("remarks") or ""):
+                        raise HTTPException(status_code=409, detail=f"#{oid} 標記延後，請先取消延後再出貨")
+                    if old.get("is_returned"):
+                        continue
+                    cursor.execute("UPDATE orders SET is_returned = 1 WHERE order_id = %s", (oid,))
+                elif action == "early":
+                    if old.get("is_early_returned"):
+                        continue
+                    cursor.execute("UPDATE orders SET is_early_returned = 1 WHERE order_id = %s", (oid,))
+                else:
+                    revised = _shipping_update_text(old.get("remarks"), action)
+                    if revised == str(old.get("remarks") or ""):
+                        continue
+                    cursor.execute("UPDATE orders SET remarks = %s WHERE order_id = %s", (revised, oid))
+                after = fetch_locked_order(cursor, oid)
+                write_audit_log(cursor, oid, "UPDATE", admin, old, after)
+                changed += 1
+        conn.commit()
+        return changed
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@app.get("/shipping")
+def shipping_page(request: Request, mode: str = "ready", customer: str = "",
+                  hide_delayed: str = "", hide_notified: str = "",
+                  admin: str = Depends(verify_admin)):
+    context = shipping_context(mode, customer, hide_delayed, hide_notified)
+    return templates.TemplateResponse(request=request, name="shipping.html", context=context)
+
+
+@app.get("/shipping/list")
+def shipping_list(request: Request, mode: str = "ready", customer: str = "",
+                  hide_delayed: str = "", hide_notified: str = "",
+                  admin: str = Depends(verify_admin)):
+    context = shipping_context(mode, customer, hide_delayed, hide_notified)
+    return templates.TemplateResponse(request=request, name="shipping_body.html", context=context)
+
+
+@app.post("/shipping/apply")
+def shipping_apply(request: Request, selected_order_ids: list[int] = Form([]),
+                   action: str = Form(""), mode: str = Form("ready"),
+                   customer: str = Form(""), hide_delayed: str = Form(""),
+                   hide_notified: str = Form(""),
+                   admin: str = Depends(verify_admin)):
+    _check_same_origin(request)
+    error = ""
+    message = ""
+    try:
+        changed = apply_shipping_action(
+            selected_order_ids, action, admin, mode, customer,
+            hide_delayed == "1", hide_notified == "1",
+        )
+        message = f"{SHIPPING_ACTIONS[action]}：成功更新 {changed} 筆訂單，並記錄變更。" if changed else "選取的訂單沒有需要更新的欄位。"
+    except HTTPException as exc:
+        if exc.status_code not in (409, 422):
+            raise
+        error = str(exc.detail)
+    context = shipping_context(mode, customer, hide_delayed, hide_notified,
+                               message=message, error=error)
+    return templates.TemplateResponse(request=request, name="shipping_body.html", context=context)
