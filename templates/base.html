@@ -39,7 +39,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/style.css?v=13"
+        href="/static/style.css?v=14"
     >
 
 </head>
@@ -112,14 +112,8 @@
         </a>
 
 
-        <a
-            class="menu-item"
-            href="#"
-        >
-
-            🚚 出貨管理
-
-        </a>
+        <a class="menu-item {% if request.url.path.startswith('/shipping') %}active{% endif %}"
+           href="/shipping">🚚 出貨管理</a>
 
 
         <a
