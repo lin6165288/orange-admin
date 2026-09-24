@@ -8,7 +8,6 @@
 
 {% block content %}
 
-
 <div class="page-header">
 
     <div>
@@ -18,7 +17,7 @@
         </h1>
 
         <p>
-            依姓名、訂單編號或物流單號查詢
+            可使用一個或多個條件精準搜尋訂單
         </p>
 
     </div>
@@ -27,7 +26,6 @@
 
 
 <div class="search-card">
-
 
     <form
         id="search-form"
@@ -41,36 +39,133 @@
         hx-indicator="#search-loading"
     >
 
-
-        <div class="search-row">
-
-
-            <input
-                type="text"
-
-                name="q"
-
-                class="search-input"
-
-                placeholder="輸入姓名、訂單編號或物流單號"
-
-                autocomplete="off"
-            >
+        <div class="search-grid">
 
 
-            <button
-                type="submit"
+            <div class="search-field">
 
-                class="search-button"
-            >
-                查詢
-            </button>
+                <label>
+                    訂單編號
+                </label>
+
+                <input
+                    type="number"
+
+                    name="search_order_id"
+
+                    placeholder="例如：3351"
+
+                    autocomplete="off"
+                >
+
+            </div>
+
+
+            <div class="search-field">
+
+                <label>
+                    客戶姓名
+                </label>
+
+                <input
+                    type="text"
+
+                    name="search_customer_name"
+
+                    placeholder="例如：趙倩"
+
+                    autocomplete="off"
+                >
+
+            </div>
+
+
+            <div class="search-field">
+
+                <label>
+                    物流單號
+                </label>
+
+                <input
+                    type="text"
+
+                    name="search_tracking_number"
+
+                    placeholder="輸入完整或部分物流單號"
+
+                    autocomplete="off"
+                >
+
+            </div>
+
+
+            <div class="search-field">
+
+                <label>
+                    人民幣金額
+                </label>
+
+                <div class="search-prefix">
+
+                    <span>
+                        ¥
+                    </span>
+
+                    <input
+                        type="number"
+
+                        name="search_amount_rmb"
+
+                        placeholder="例如：650"
+
+                        min="0"
+
+                        step="0.01"
+                    >
+
+                </div>
+
+            </div>
+
+
+            <div class="search-field">
+
+                <label>
+                    平台
+                </label>
+
+                <input
+                    type="text"
+
+                    name="search_platform"
+
+                    placeholder="例如：閒魚、微店、集運"
+
+                    autocomplete="off"
+                >
+
+            </div>
+
+
+            <div class="search-field">
+
+                <label>
+                    下單日期
+                </label>
+
+                <input
+                    type="date"
+
+                    name="search_order_date"
+                >
+
+            </div>
 
 
         </div>
 
 
-        <div class="filter-row">
+        <div class="search-footer">
 
 
             <label class="filter-check">
@@ -88,13 +183,26 @@
             </label>
 
 
-            <a
-                href="/orders"
+            <div class="search-actions">
 
-                class="clear-filter"
-            >
-                清除條件
-            </a>
+                <a
+                    href="/orders"
+
+                    class="clear-filter-button"
+                >
+                    清除條件
+                </a>
+
+
+                <button
+                    type="submit"
+
+                    class="search-button"
+                >
+                    🔍 查詢
+                </button>
+
+            </div>
 
 
         </div>
@@ -117,13 +225,11 @@
 
 <div id="order-results">
 
-
     <div class="empty-state">
 
-        輸入姓名、訂單編號或物流單號開始查詢
+        輸入上方條件開始查詢
 
     </div>
-
 
 </div>
 
