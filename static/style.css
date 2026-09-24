@@ -2284,3 +2284,13 @@ body {
 .ship-fee-table th { background:#fafafa; color:#777; font-weight:500; }
 .ship-fee-table tr:last-child td { border-bottom:0; }
 .ship-fee-total { font-weight:700; color:#b96b14; white-space:nowrap; }
+
+
+/* 出貨管理：客戶統整／訂單明細匯出 */
+.ship-export-toolbar {display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:14px;}
+.ship-export-buttons {display:flex;gap:10px;flex-wrap:wrap;}
+.ship-export-btn {border:1px solid #edc58e;background:#fff9ef;color:#a76519;padding:10px 14px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.ship-export-btn:hover {background:#ffefd7;}
+.ship-fee-table input[type=checkbox] {accent-color:#ed922e;width:17px;height:17px;}
+.ship-export-toolbar + .ship-muted {margin-top:10px;}
+@media(max-width:650px) {.ship-export-toolbar{align-items:stretch;flex-direction:column}.ship-export-buttons{flex-direction:column}.ship-export-btn{white-space:normal;width:100%}}
