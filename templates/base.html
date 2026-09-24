@@ -39,7 +39,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/style.css?v=12"
+        href="/static/style.css?v=13"
     >
 
 </head>
@@ -104,13 +104,11 @@
         </a>
 
 
-        <a
-            class="menu-item"
-            href="#"
+                <a
+            class="menu-item {% if request.url.path.startswith('/inbound') %}active{% endif %}"
+            href="/inbound"
         >
-
             📦 入庫管理
-
         </a>
 
 
