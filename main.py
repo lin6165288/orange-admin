@@ -2,8 +2,10 @@ import os
 import json
 import secrets
 import threading
+import logging
+import re
 
-from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, ROUND_CEILING
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -2110,3 +2112,300 @@ def create_order(
             platform=platform, keep_last_name=keep_name, success_id=new_id,
         ),
     )
+
+
+# =========================================================
+# 入庫管理：沿用 Streamlit 解析與 0.05 kg 進位，增加預覽與交易紀錄
+# =========================================================
+
+INBOUND_PATTERNS = (
+    re.compile(r"([A-Z]{1,3}\d{8,})[^\d\n]*入庫重量\s*([0-9]+(?:\.[0-9]+)?)\s*KG", re.I),
+    re.compile(r"(\d{9,})[^\d\n]*入庫重量\s*([0-9]+(?:\.[0-9]+)?)\s*KG", re.I),
+    re.compile(r"單號[:：]?\s*([A-Z0-9]{8,})[^\d\n]*重量[:：]?\s*([0-9]+(?:\.[0-9]+)?)", re.I),
+)
+
+INBOUND_LIMIT = 100
+INBOUND_MAX_CHARS = 50000
+INBOUND_MAX_LINES = 300
+INBOUND_WEIGHT_MAX = Decimal("10000")
+_failed_storage_ready = False
+_failed_storage_lock = threading.Lock()
+
+
+def ensure_failed_storage():
+    """既有 failed_orders 相同結構；DDL 在寫入交易之外執行。"""
+    global _failed_storage_ready
+    if _failed_storage_ready:
+        return
+    with _failed_storage_lock:
+        if _failed_storage_ready:
+            return
+        conn = get_db()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS failed_orders (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        tracking_number VARCHAR(64) NOT NULL,
+                        weight_kg DECIMAL(10,3) NULL,
+                        raw_message TEXT NULL,
+                        retry_count INT NOT NULL DEFAULT 0,
+                        last_error VARCHAR(255) NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+                        UNIQUE KEY uk_tracking (tracking_number)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """)
+            conn.commit()
+            _failed_storage_ready = True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def inbound_weight(value):
+    """舊版 round_weight：小於 0.1→0.1；其餘向上到 0.05。"""
+    weight = Decimal(str(value))
+    if not weight.is_finite() or weight < 0 or weight > INBOUND_WEIGHT_MAX:
+        raise ValueError("重量超出可接受範圍")
+    if weight < Decimal("0.1"):
+        return Decimal("0.10")
+    rounded = ((weight / Decimal("0.05")).to_integral_value(rounding=ROUND_CEILING)
+               * Decimal("0.05"))
+    if rounded > INBOUND_WEIGHT_MAX:
+        raise ValueError("重量超出可接受範圍")
+    return rounded.quantize(Decimal("0.01"))
+
+
+def parse_inbound_text(raw_message):
+    if len(raw_message) > INBOUND_MAX_CHARS:
+        return {"items": [], "issues": ["貼上文字過長，請分批處理（每批不超過 5 萬字）"],
+                "conflicts": [], "fatal": True, "duplicate_count": 0}
+    lines = raw_message.splitlines()
+    if len(lines) > INBOUND_MAX_LINES:
+        return {"items": [], "issues": ["一次最多處理 300 行，請分批貼上"],
+                "conflicts": [], "fatal": True, "duplicate_count": 0}
+    items_by_tracking = {}
+    issues = []
+    conflicts = []
+    duplicate_count = 0
+    for number, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        matched = next((m for pattern in INBOUND_PATTERNS
+                        if (m := pattern.search(line))), None)
+        if not matched:
+            issues.append(f"第 {number} 行未找到單號＋重量，已略過")
+            continue
+        tracking = matched.group(1).strip().upper()
+        if len(tracking) > 50:
+            issues.append(f"第 {number} 行物流單號過長，已略過")
+            continue
+        try:
+            weight = inbound_weight(matched.group(2))
+        except (ValueError, InvalidOperation):
+            issues.append(f"第 {number} 行重量格式錯誤，已略過")
+            continue
+        old = items_by_tracking.get(tracking)
+        if old is not None:
+            duplicate_count += 1
+            if old["weight_kg"] != weight:
+                conflicts.append(f"第 {number} 行與第 {old['line']} 行的同一物流單號重量不同，請先確認")
+            continue
+        items_by_tracking[tracking] = {
+            "line": number, "tracking_number": tracking,
+            "weight_kg": weight, "raw_line": line,
+        }
+        if len(items_by_tracking) > INBOUND_LIMIT:
+            return {"items": [], "issues": ["每批最多 100 個不同單號，請分批貼上"],
+                    "conflicts": [], "fatal": True, "duplicate_count": duplicate_count}
+    return {"items": list(items_by_tracking.values()), "issues": issues,
+            "conflicts": conflicts, "fatal": False, "duplicate_count": duplicate_count}
+
+
+def inbound_queue_data():
+    ensure_failed_storage()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS n FROM failed_orders")
+            total = cursor.fetchone()["n"]
+            cursor.execute("""SELECT id, tracking_number, weight_kg, raw_message,
+                              retry_count, last_error, updated_at FROM failed_orders
+                              ORDER BY updated_at DESC, id DESC LIMIT 100""")
+            return cursor.fetchall(), total
+    finally:
+        conn.close()
+
+
+def inbound_page_context(result=None, raw_message=""):
+    queue, queue_total = inbound_queue_data()
+    return {"queue": queue, "queue_total": queue_total,
+            "result": result, "raw_message": raw_message}
+
+
+def record_missing_inbound(cursor, tracking, weight, raw, reason):
+    # Upsert matches the old Streamlit failed_orders retry queue.
+    cursor.execute("""
+        INSERT INTO failed_orders
+            (tracking_number, weight_kg, raw_message, retry_count, last_error)
+        VALUES (%s, %s, %s, 1, %s)
+        ON DUPLICATE KEY UPDATE
+            weight_kg = VALUES(weight_kg),
+            raw_message = VALUES(raw_message),
+            last_error = VALUES(last_error),
+            retry_count = retry_count + 1,
+            updated_at = CURRENT_TIMESTAMP
+    """, (tracking, weight, raw[:5000], reason[:250]))
+
+
+def apply_one_inbound(item, admin):
+    """單號一個 transaction；相同單號只一筆記重量，其他筆為 0kg。"""
+    tracking, weight = item["tracking_number"], item["weight_kg"]
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""SELECT * FROM orders WHERE tracking_number = %s
+                              ORDER BY order_id ASC FOR UPDATE""", (tracking,))
+            orders = cursor.fetchall()
+            if not orders:
+                record_missing_inbound(cursor, tracking, weight,
+                                      item.get("raw_line", ""), "找不到對應訂單")
+                conn.commit()
+                return {"tracking_number": tracking, "weight_kg": weight,
+                        "status": "待重試", "note": "找不到對應訂單，已加入佇列"}
+            changed = 0
+            now = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
+            for idx, before in enumerate(orders):
+                target_weight = weight if idx == 0 else Decimal("0.00")
+                if before.get("is_arrived") and before.get("weight_kg") is not None \
+                        and Decimal(str(before["weight_kg"])) == target_weight:
+                    continue
+                label = f"主筆={weight}kg" if idx == 0 else "同單號=0kg"
+                note = f"｜自動入庫({now}) {label}"
+                cursor.execute("""UPDATE orders
+                    SET is_arrived = 1, weight_kg = %s,
+                        remarks = CONCAT(COALESCE(remarks, ''), %s)
+                    WHERE order_id = %s""",
+                    (target_weight, note, before["order_id"]))
+                after = fetch_locked_order(cursor, before["order_id"])
+                write_audit_log(cursor, before["order_id"], "UPDATE", admin, before, after)
+                changed += 1
+            # 清除同單號的舊失敗佇列，與更新同時 commit。
+            cursor.execute("DELETE FROM failed_orders WHERE tracking_number = %s", (tracking,))
+        conn.commit()
+        return {"tracking_number": tracking, "weight_kg": weight,
+                "status": "成功" if changed else "無需變更",
+                "note": f"{len(orders)} 筆訂單，更新 {changed} 筆；主筆 #{orders[0]['order_id']}"}
+    except Exception:
+        conn.rollback()
+        logging.exception("入庫失敗，單號尾碼=%s", tracking[-4:])
+        return {"tracking_number": tracking, "weight_kg": weight,
+                "status": "失敗", "note": "更新失敗並已回滾，請查看 Railway Logs"}
+    finally:
+        conn.close()
+
+
+@app.get("/inbound")
+def inbound_page(request: Request, admin: str = Depends(verify_admin)):
+    return templates.TemplateResponse(request=request, name="inbound.html",
+                                      context=inbound_page_context())
+
+
+@app.post("/inbound/preview")
+def inbound_preview(request: Request, raw_message: str = Form(""),
+                    admin: str = Depends(verify_admin)):
+    _check_same_origin(request)
+    parsed = parse_inbound_text(raw_message)
+    if parsed["items"]:
+        conn = get_db()
+        try:
+            with conn.cursor() as cursor:
+                keys = [row["tracking_number"] for row in parsed["items"]]
+                placeholders = ",".join(["%s"] * len(keys))
+                cursor.execute(
+                    "SELECT tracking_number, COUNT(*) AS n, MIN(order_id) AS first_id "
+                    f"FROM orders WHERE tracking_number IN ({placeholders}) GROUP BY tracking_number",
+                    keys)
+                counts = {r["tracking_number"].upper(): r for r in cursor.fetchall()}
+            for row in parsed["items"]:
+                found = counts.get(row["tracking_number"])
+                row["matched_count"] = found["n"] if found else 0
+                row["first_id"] = found["first_id"] if found else None
+        finally:
+            conn.close()
+    return templates.TemplateResponse(request=request, name="inbound_preview.html",
+                                      context={**parsed, "raw_message": raw_message})
+
+
+@app.post("/inbound/apply")
+def inbound_apply(request: Request, raw_message: str = Form(""),
+                  admin: str = Depends(verify_admin)):
+    _check_same_origin(request)
+    parsed = parse_inbound_text(raw_message)
+    if parsed["fatal"] or parsed["conflicts"] or not parsed["items"]:
+        result = {"error": "解析有衝突或沒有有效單號，請重新預覽後再確認", "rows": []}
+    else:
+        ensure_audit_storage()
+        ensure_failed_storage()
+        rows = [apply_one_inbound(row, admin) for row in parsed["items"]]
+        result = {"error": "", "rows": rows,
+                  "success_count": sum(r["status"] in ("成功", "無需變更") for r in rows),
+                  "pending_count": sum(r["status"] == "待重試" for r in rows)}
+    return templates.TemplateResponse(request=request, name="inbound_body.html",
+                                      context=inbound_page_context(result=result))
+
+
+@app.post("/inbound/retry")
+def inbound_retry(request: Request, admin: str = Depends(verify_admin)):
+    _check_same_origin(request)
+    ensure_audit_storage()
+    ensure_failed_storage()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""SELECT id, tracking_number, weight_kg, raw_message
+                              FROM failed_orders ORDER BY id ASC LIMIT 100""")
+            queued = cursor.fetchall()
+    finally:
+        conn.close()
+    results = []
+    for row in queued:
+        try:
+            weight = inbound_weight(row["weight_kg"])
+        except (ValueError, TypeError, InvalidOperation):
+            results.append({"tracking_number": row["tracking_number"], "weight_kg": "—",
+                            "status": "失敗", "note": "佇列重量無效，請刪除後重新貼上"})
+            continue
+        results.append(apply_one_inbound({"tracking_number": row["tracking_number"],
+                                          "weight_kg": weight,
+                                          "raw_line": row.get("raw_message") or ""}, admin))
+    result = {"error": "", "rows": results,
+              "success_count": sum(r["status"] in ("成功", "無需變更") for r in results),
+              "pending_count": sum(r["status"] == "待重試" for r in results)}
+    return templates.TemplateResponse(request=request, name="inbound_body.html",
+                                      context=inbound_page_context(result=result))
+
+
+@app.post("/inbound/queue/{queue_id}/delete")
+def inbound_delete_failed(request: Request, queue_id: int,
+                          admin: str = Depends(verify_admin)):
+    _check_same_origin(request)
+    ensure_failed_storage()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM failed_orders WHERE id = %s", (queue_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return templates.TemplateResponse(request=request, name="inbound_body.html",
+                                      context=inbound_page_context(
+                                          result={"error": "", "rows": [], "message": "佇列項目已刪除"}))
