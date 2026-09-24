@@ -363,7 +363,6 @@
 
     {% if order.remarks %}
 
-
     <div class="detail-note">
 
         <span>
@@ -376,6 +375,22 @@
 
     </div>
 
+    {% endif %}
+
+
+    {% if order.cancel_note %}
+
+    <div class="detail-note cancel-note">
+
+        <span>
+            取消原因
+        </span>
+
+        <p>
+            {{ order.cancel_note }}
+        </p>
+
+    </div>
 
     {% endif %}
 
