@@ -39,7 +39,7 @@
 
     <link
         rel="stylesheet"
-        href="/static/style.css?v=11"
+        href="/static/style.css?v=12"
     >
 
 </head>
@@ -85,7 +85,7 @@
 
         <a
             class="menu-item
-            {% if request.url.path.startswith('/orders') %}
+            {% if request.url.path == '/orders' or request.url.path.startswith('/orders/search') %}
             active
             {% endif %}"
             href="/orders"
@@ -97,12 +97,10 @@
 
 
         <a
-            class="menu-item"
-            href="#"
+            class="menu-item {% if request.url.path.startswith('/orders/new') %}active{% endif %}"
+            href="/orders/new"
         >
-
             ＋ 新增訂單
-
         </a>
 
 
