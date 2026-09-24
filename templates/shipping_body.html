@@ -1,0 +1,88 @@
+<section class="ship-card">
+  <h2>選擇出貨名單</h2>
+  <p class="ship-muted">可出貨：同一客戶尚未運回的非取消訂單均已到貨，或這筆已到貨並標記提前運回。兩種模式均不列出「已運回」包裹。</p>
+  <form hx-get="/shipping/list" hx-target="#shipping-body" hx-swap="innerHTML" class="ship-filter">
+    <div class="ship-modes">
+      <label><input type="radio" name="mode" value="ready" {% if mode == 'ready' %}checked{% endif %}> 系統判定可出貨</label>
+      <label><input type="radio" name="mode" value="customer" {% if mode == 'customer' %}checked{% endif %}> 依客戶姓名批次處理</label>
+    </div>
+    <label class="ship-name-label" for="ship-customer">客戶姓名（只有選「依客戶姓名」才需要填）</label>
+    <input id="ship-customer" name="customer" maxlength="50" value="{{ customer }}" placeholder="輸入客戶姓名（可部分搜尋）" class="ship-input" autocomplete="off">
+    <div class="ship-options">
+      <label><input type="checkbox" name="hide_delayed" value="1" {% if hide_delayed %}checked{% endif %}> 隱藏已延後</label>
+      <label><input type="checkbox" name="hide_notified" value="1" {% if hide_notified %}checked{% endif %}> 隱藏已通知</label>
+      <button class="ship-primary" type="submit">🔍 更新名單</button>
+    </div>
+  </form>
+</section>
+
+{% if error %}<div class="ship-msg ship-error" role="alert">{{ error }}</div>{% endif %}
+{% if message %}<div class="ship-msg ship-success" role="status">{{ message }}</div>{% endif %}
+
+{% if mode == 'customer' and not customer %}
+<div class="ship-card ship-empty">請先輸入客戶姓名，再按「更新名單」。</div>
+{% else %}
+<section class="ship-metrics">
+  <div class="ship-metric"><span>目前顯示訂單</span><strong>{{ count }} <small>筆</small></strong></div>
+  <div class="ship-metric"><span>顯示總重量</span><strong>{{ '%.2f'|format(total_weight) }} <small>kg</small></strong></div>
+  <div class="ship-metric"><span>客戶數</span><strong>{{ groups|length }} <small>位</small></strong></div>
+  <div class="ship-metric ship-fee-metric"><span>本頁總國際運費（估算）</span><strong>NT$ {{ '%.0f'|format(total_fee) }}</strong></div>
+</section>
+{% if has_more %}<div class="ship-msg ship-warning">符合條件的訂單超過 500 筆，目前只顯示前 500 筆；上方重量與國際運費僅計算「目前顯示」的訂單，不代表所有符合條件訂單的總額。請用姓名分批操作。</div>{% endif %}
+{% if groups %}
+<details class="ship-card ship-summary" open>
+  <summary>📋 各客戶包裹與國際運費（{{ groups|length }} 位）</summary>
+  <p class="ship-muted ship-fee-hint">每位客戶分開計算：純集運（平台＝集運）合併重量後每 0.5 kg 進位、最低 1 kg，NT$90/kg；代購（其他平台）合併重量後每 0.5 kg 進位、最低 0.5 kg，NT$70/kg。兩類分別計費再相加。重量尚未登記（0 kg）的類別暫不估價，並非免運費。</p>
+  <div class="ship-fee-table-wrap"><table class="ship-fee-table">
+  <thead><tr><th>客戶</th><th>未運回件數 / 實重</th><th>純集運（件 / 實重 → 計費重 / 運費）</th><th>代購（件 / 實重 → 計費重 / 運費）</th><th>合計國際運費</th></tr></thead>
+  <tbody>{% for group in groups %}
+    <tr>
+      <td class="ship-customer">{{ group.name }}</td>
+      <td>{{ group.count }} 件 / {{ '%.2f'|format(group.weight) }} kg</td>
+      <td>{% if group.forwarding_count %}{{ group.forwarding_count }} 件 / {{ '%.2f'|format(group.forwarding_weight) }} kg → {{ '%.2f'|format(group.forwarding_billed_weight) }} kg / NT$ {{ '%.0f'|format(group.forwarding_fee) }}{% else %}—{% endif %}</td>
+      <td>{% if group.purchase_count %}{{ group.purchase_count }} 件 / {{ '%.2f'|format(group.purchase_weight) }} kg → {{ '%.2f'|format(group.purchase_billed_weight) }} kg / NT$ {{ '%.0f'|format(group.purchase_fee) }}{% else %}—{% endif %}</td>
+      <td class="ship-fee-total">NT$ {{ '%.0f'|format(group.total_fee) }}</td>
+    </tr>{% endfor %}
+  </tbody></table></div>
+</details>
+{% endif %}
+{% if rows %}
+<section class="ship-card">
+  <div class="ship-header"><h2>訂單清單</h2><span class="ship-muted">每批最多選 100 筆；已運回訂單不會出現在此清單，只會修改勾選的訂單。</span></div>
+  <form hx-post="/shipping/apply" hx-target="#shipping-body" hx-swap="innerHTML"
+        hx-confirm="確定要批次更新勾選的訂單嗎？更新後會同步寫入操作紀錄。">
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <input type="hidden" name="customer" value="{{ customer }}">
+    {% if hide_delayed %}<input type="hidden" name="hide_delayed" value="1">{% endif %}
+    {% if hide_notified %}<input type="hidden" name="hide_notified" value="1">{% endif %}
+    <div class="ship-table-wrap"><table class="ship-table"><thead><tr>
+      <th>選取</th><th>訂單</th><th>客戶</th><th>平台</th><th>單號</th><th>重量</th><th>狀態</th><th>備註標記</th>
+    </tr></thead><tbody>
+    {% for order in rows %}
+    <tr>
+      <td><input type="checkbox" name="selected_order_ids" value="{{ order.order_id }}" aria-label="勾選訂單 {{ order.order_id }}"></td>
+      <td>#{{ order.order_id }}</td>
+      <td class="ship-customer">{{ order.customer_name }}</td>
+      <td>{{ order.platform or '—' }}</td>
+      <td class="ship-tracking">{{ order.tracking_number or '—' }}</td>
+      <td>{{ '%.2f'|format(order.weight_num) }} kg</td>
+      <td>{% if order.is_arrived %}<span class="ship-tag ready">已到貨</span>{% else %}<span class="ship-tag">未到貨</span>{% endif %}
+          {% if order.is_early_returned %}<span class="ship-tag early">提前運回</span>{% endif %}</td>
+      <td>{% if order.delayed %}<span class="ship-tag delay">延後</span>{% endif %}
+          {% if order.notified %}<span class="ship-tag notified">已通知</span>{% endif %}
+          {% if not order.delayed and not order.notified %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody></table></div>
+    <p class="ship-muted">「標記已運回」只允許已到貨、未延後的訂單；「提前運回」可先標記，等到貨後才會進入可出貨名單。</p>
+    <div class="ship-footer">
+      <label class="ship-select-all"><input type="checkbox" onchange="this.closest('form').querySelectorAll('input[name=selected_order_ids]').forEach(x => x.checked = this.checked)"> 全選本頁（最多 100 筆可送出）</label>
+      <div class="ship-actions"><select name="action" required aria-label="批次操作">
+        <option value="">選擇批次操作</option>
+        {% for action_key,action_name in actions.items() %}<option value="{{ action_key }}">{{ action_name }}</option>{% endfor %}
+      </select><button type="submit" class="ship-primary">確認更新</button></div>
+    </div>
+  </form>
+</section>
+{% else %}<div class="ship-card ship-empty">目前沒有符合條件的訂單。</div>{% endif %}
+{% endif %}
