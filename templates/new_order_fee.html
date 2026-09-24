@@ -1,0 +1,10 @@
+{% if error_message %}
+<div class="create-fee-error" role="status">{{ error_message }}</div>
+{% else %}
+<div class="create-fee-summary">
+    <div><small>目前會員等級</small><strong>{{ member_level }}</strong></div>
+    <div><small>原始手續費</small><strong>NT$ {{ base_fee }}</strong></div>
+    <div><small>VIP 折扣</small><strong>{{ vip_discount }}</strong></div>
+    <div class="create-fee-total"><small>應收代購手續費</small><strong>NT$ {{ calculated_fee }}</strong></div>
+</div>
+{% endif %}
