@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN, R
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, quote
 
 import pymysql
 
@@ -28,7 +28,8 @@ from fastapi.security import (
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
+from shipping_excel import make_shipping_xlsx
 
 
 # =========================================================
@@ -2689,3 +2690,67 @@ def shipping_apply(request: Request, selected_order_ids: list[int] = Form([]),
     context = shipping_context(mode, customer, hide_delayed, hide_notified,
                                message=message, error=error)
     return templates.TemplateResponse(request=request, name="shipping_body.html", context=context)
+
+
+# =========================================================
+# 出貨 Excel：選客戶匯出統整／名下訂單明細，或只匯出勾選訂單
+# =========================================================
+
+@app.post("/shipping/export")
+def shipping_export(
+    request: Request,
+    export_kind: str = Form(""),
+    selected_customers: list[str] = Form([]),
+    selected_order_ids: list[int] = Form([]),
+    mode: str = Form("ready"),
+    customer: str = Form(""),
+    hide_delayed: str = Form(""),
+    hide_notified: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    if export_kind not in ("customer_summary", "customer_details", "selected_orders"):
+        raise HTTPException(status_code=422, detail="匯出類型不正確")
+    if mode not in ("ready", "customer"):
+        raise HTTPException(status_code=422, detail="出貨模式不正確")
+    if export_kind == "selected_orders":
+        if not 1 <= len(selected_order_ids) <= 500 or len(set(selected_order_ids)) != len(selected_order_ids):
+            raise HTTPException(status_code=422, detail="請先選取 1～500 筆不重複訂單")
+    else:
+        if not 1 <= len(selected_customers) <= 500 or len(set(selected_customers)) != len(selected_customers):
+            raise HTTPException(status_code=422, detail="請先選取 1～500 位不重複客戶")
+    # 與目前畫面同一查詢條件及前 500 筆範圍，防止偽造跨客戶匯出。
+    rows, _has_more = shipping_rows(
+        mode, customer, hide_delayed == "1", hide_notified == "1"
+    )
+    if export_kind == "selected_orders":
+        allowed_ids = {row["order_id"] for row in rows}
+        if not set(selected_order_ids).issubset(allowed_ids):
+            raise HTTPException(status_code=409, detail="名單已變動，請更新後重新勾選訂單")
+        chosen = set(selected_order_ids)
+        export_rows = [row for row in rows if row["order_id"] in chosen]
+    else:
+        allowed_names = {row["customer_name"] for row in rows}
+        if not set(selected_customers).issubset(allowed_names):
+            raise HTTPException(status_code=409, detail="名單已變動，請更新後重新勾選客戶")
+        chosen = set(selected_customers)
+        export_rows = [row for row in rows if row["customer_name"] in chosen]
+    # 本次勾選範圍重新分組合重，保持與原出貨運費算法完全一致。
+    groups = shipping_fee_breakdown(export_rows)
+    wb_kind = "summary" if export_kind == "customer_summary" else "details"
+    payload = make_shipping_xlsx(groups, export_rows, kind=wb_kind)
+    label = {
+        "customer_summary": "客戶運費統整_勾選",
+        "customer_details": "客戶訂單明細_勾選",
+        "selected_orders": "單筆訂單明細_勾選",
+    }[export_kind]
+    filename = f"{label}_{datetime.now(ZoneInfo('Asia/Taipei')):%Y%m%d_%H%M}.xlsx"
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=shipping.xlsx; filename*=UTF-8''{quote(filename)}",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
