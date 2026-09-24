@@ -2278,6 +2278,13 @@ def apply_one_inbound(item, admin):
                 conn.commit()
                 return {"tracking_number": tracking, "weight_kg": weight,
                         "status": "待重試", "note": "找不到對應訂單，已加入佇列"}
+            # 顯示該物流單號所屬的客戶（同單號可能綁定不同客戶）。
+            customer_names = list(dict.fromkeys(
+                (str(order.get("customer_name") or "").strip() or "未填姓名")
+                for order in orders
+            ))
+            owners = "、".join(customer_names)
+            primary_owner = str(orders[0].get("customer_name") or "").strip() or "未填姓名"
             changed = 0
             now = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
             for idx, before in enumerate(orders):
@@ -2300,7 +2307,8 @@ def apply_one_inbound(item, admin):
         conn.commit()
         return {"tracking_number": tracking, "weight_kg": weight,
                 "status": "成功" if changed else "無需變更",
-                "note": f"{len(orders)} 筆訂單，更新 {changed} 筆；主筆 #{orders[0]['order_id']}"}
+                "note": (f"客戶：{owners}；{len(orders)} 筆訂單，更新 {changed} 筆；"
+                         f"主筆 #{orders[0]['order_id']}（{primary_owner}）")}
     except Exception:
         conn.rollback()
         logging.exception("入庫失敗，單號尾碼=%s", tracking[-4:])
@@ -2328,14 +2336,21 @@ def inbound_preview(request: Request, raw_message: str = Form(""),
                 keys = [row["tracking_number"] for row in parsed["items"]]
                 placeholders = ",".join(["%s"] * len(keys))
                 cursor.execute(
-                    "SELECT tracking_number, COUNT(*) AS n, MIN(order_id) AS first_id "
-                    f"FROM orders WHERE tracking_number IN ({placeholders}) GROUP BY tracking_number",
+                    "SELECT tracking_number, order_id, customer_name "
+                    f"FROM orders WHERE tracking_number IN ({placeholders}) ORDER BY order_id ASC",
                     keys)
-                counts = {r["tracking_number"].upper(): r for r in cursor.fetchall()}
+                matched_orders = {}
+                for order in cursor.fetchall():
+                    key = str(order["tracking_number"]).upper()
+                    matched_orders.setdefault(key, []).append(order)
             for row in parsed["items"]:
-                found = counts.get(row["tracking_number"])
-                row["matched_count"] = found["n"] if found else 0
-                row["first_id"] = found["first_id"] if found else None
+                found = matched_orders.get(row["tracking_number"], [])
+                row["matched_count"] = len(found)
+                row["first_id"] = found[0]["order_id"] if found else None
+                row["customer_names"] = list(dict.fromkeys(
+                    str(order.get("customer_name") or "").strip() or "未填姓名"
+                    for order in found
+                ))
         finally:
             conn.close()
     return templates.TemplateResponse(request=request, name="inbound_preview.html",
