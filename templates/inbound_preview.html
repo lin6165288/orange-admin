@@ -1,0 +1,19 @@
+{% if fatal %}
+<div class="inbound-notice inbound-error" role="alert">{{ issues|join('；') }}</div>
+{% else %}
+    {% if issues %}<div class="inbound-notice inbound-info">以下文字未解析，**不會**更新：</div>
+    <ul class="inbound-warning-list">{% for issue in issues %}<li>{{ issue }}</li>{% endfor %}</ul>{% endif %}
+    {% if conflicts %}<div class="inbound-notice inbound-error" role="alert">同單號出現不同重量，已禁止送出。請修正原文並重新預覽：</div>
+    <ul class="inbound-warning-list">{% for issue in conflicts %}<li>{{ issue }}</li>{% endfor %}</ul>{% endif %}
+    {% if items %}
+        <h2 style="font-size:17px;margin-top:22px;">預覽：{{ items|length }} 個單號</h2>
+        {% if duplicate_count %}<p class="inbound-muted">相同單號重複出現 {{ duplicate_count }} 次，預計只處理一次。</p>{% endif %}
+        <div class="inbound-table-wrap"><table class="inbound-table"><thead><tr><th>物流單號</th><th>進位後重量</th><th>匹配訂單</th></tr></thead><tbody>
+        {% for row in items %}<tr><td>{{ row.tracking_number }}</td><td>{{ row.weight_kg }} kg</td><td>{% if row.matched_count %}{{ row.matched_count }} 筆，主筆 #{{ row.first_id }}{% else %}<span class="inbound-status wait">找不到 → 佇列</span>{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div>
+        {% if not conflicts %}<form hx-post="/inbound/apply" hx-target="#inbound-body" hx-swap="innerHTML" hx-disabled-elt="find button[type=submit]">
+            <textarea name="raw_message" class="inbound-hidden">{{ raw_message }}</textarea>
+            <div class="inbound-actions"><span class="inbound-muted">請核對重量及主筆；送出後才會更新資料庫。</span><button type="submit" class="inbound-button" hx-confirm="確認依預覽結果更新到貨與重量？">✅ 確認寫入</button></div>
+        </form>{% endif %}
+    {% else %}<div class="inbound-notice inbound-info">未解析出有效的單號與重量，請檢查訊息格式。</div>{% endif %}
+{% endif %}

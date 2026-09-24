@@ -1,0 +1,38 @@
+{% if result %}
+    {% if result.error %}<div class="inbound-notice inbound-error" role="alert">{{ result.error }}</div>{% endif %}
+    {% if result.message %}<div class="inbound-notice inbound-success" role="status">{{ result.message }}</div>{% endif %}
+    {% if result.rows %}
+        <div class="inbound-card">
+            <h2>本次處理結果</h2>
+            <p class="inbound-muted">成功／無需變更：{{ result.success_count }} 個單號；待重試：{{ result.pending_count }} 個。失敗列請留意下方說明。</p>
+            <div class="inbound-table-wrap"><table class="inbound-table"><thead><tr><th>物流單號</th><th>重量</th><th>狀態</th><th>說明</th></tr></thead><tbody>
+            {% for row in result.rows %}<tr><td>{{ row.tracking_number }}</td><td>{{ row.weight_kg }} kg</td>
+            <td><span class="inbound-status {% if row.status == '待重試' %}wait{% elif row.status == '失敗' %}fail{% endif %}">{{ row.status }}</span></td><td>{{ row.note }}</td></tr>{% endfor %}
+            </tbody></table></div>
+        </div>
+    {% endif %}
+{% endif %}
+<div class="inbound-card">
+    <h2>貼上入庫訊息</h2>
+    <p class="inbound-muted">可一次貼上多則通知，每行須包含物流單號與「入庫重量 … KG」；也支援「單號 … 重量 …」格式。重量不足 0.1 kg 記 0.1 kg，其他向上進位至 0.05 kg；同單號僅一筆訂單計重。每批最多 100 個單號。</p>
+    <form hx-post="/inbound/preview" hx-target="#inbound-preview" hx-swap="innerHTML" hx-indicator="#inbound-loading">
+        <label for="inbound-raw" class="inbound-muted">LINE 通知原文</label>
+        <textarea class="inbound-area" id="inbound-raw" name="raw_message" maxlength="50000" placeholder="貼上入庫通知文字，每行包含物流單號與入庫重量" required>{{ raw_message }}</textarea>
+        <div class="inbound-actions"><span id="inbound-loading" class="htmx-indicator">解析中…</span><button class="inbound-button" type="submit">🔎 解析預覽</button></div>
+    </form>
+    <div id="inbound-preview"></div>
+</div>
+<div class="inbound-card">
+    <div class="inbound-split"><div><h2>📨 待重試佇列（{{ queue_total }}）</h2><p class="inbound-muted">找不到訂單的單號會留在 MySQL；新增訂單後可手動重試。此頁不會自動重試。</p></div>
+    {% if queue_total %}<button class="inbound-button-secondary" type="button" hx-post="/inbound/retry" hx-target="#inbound-body" hx-swap="innerHTML" hx-confirm="確認重試最多 100 個待處理單號？">🔁 重試佇列</button>{% endif %}
+    </div>
+    {% if queue %}
+    <div class="inbound-table-wrap"><table class="inbound-table"><thead><tr><th>物流單號</th><th>重量</th><th>重試</th><th>最後錯誤</th><th>操作</th></tr></thead><tbody>
+    {% for row in queue %}
+    <tr><td>{{ row.tracking_number }}</td><td>{{ row.weight_kg if row.weight_kg is not none else '—' }} kg</td><td>{{ row.retry_count }}</td><td>{{ row.last_error or '—' }}</td>
+    <td><button type="button" class="inbound-button-danger" hx-post="/inbound/queue/{{ row.id }}/delete" hx-target="#inbound-body" hx-swap="innerHTML" hx-confirm="確定移除此待重試單號？不會刪除任何訂單。">移除</button></td></tr>
+    {% endfor %}
+    </tbody></table></div>
+    {% if queue_total > queue|length %}<p class="inbound-muted">先顯示最新 {{ queue|length }} 筆，按重試可分批處理。</p>{% endif %}
+    {% else %}<p class="inbound-muted">目前沒有待重試單號。</p>{% endif %}
+</div>
