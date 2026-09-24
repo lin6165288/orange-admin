@@ -1,0 +1,68 @@
+{% if success_id %}
+<div class="create-success" role="status">
+    ✅ 訂單 <strong>#{{ success_id }}</strong> 已新增，並寫入操作紀錄。
+    <a href="/orders?new={{ success_id }}">前往訂單查詢</a>
+</div>
+{% endif %}
+{% if error_message %}
+<div class="create-error" role="alert">{{ error_message }}</div>
+{% endif %}
+<section class="create-card">
+    <form id="create-order-form" hx-post="/orders/new" hx-target="#new-order-panel" hx-swap="innerHTML" hx-indicator="#create-loading">
+        <div class="create-heading">基本資料</div>
+        <div class="edit-full-grid">
+            <div class="edit-field create-field">
+                <label for="new-name">客戶姓名 <b class="required">*</b></label>
+                <input id="new-name" name="customer_name" type="text" list="new-name-options" value="{{ customer_name }}" maxlength="50" autocomplete="off" placeholder="輸入客戶姓名" required
+                       hx-get="/orders/new/fee" hx-trigger="input changed delay:350ms" hx-include="#create-order-form" hx-target="#fee-preview" hx-swap="innerHTML">
+                <datalist id="new-name-options">
+                    {% for item in customer_names %}<option value="{{ item }}"></option>{% endfor %}
+                </datalist>
+                <p class="create-hint">輸入姓名即可選擇既有客人，沒有的姓名會在儲存時建立會員資料。</p>
+            </div>
+            <div class="edit-field create-field">
+                <label for="new-date">下單日期 <b class="required">*</b></label>
+                <input id="new-date" name="order_time" type="date" value="{{ order_time }}" required>
+            </div>
+            <div class="edit-field create-field">
+                <label for="new-platform">下單平台</label>
+                <select id="new-platform" name="platform"
+                        hx-get="/orders/new/fee" hx-trigger="change" hx-include="#create-order-form" hx-target="#fee-preview" hx-swap="innerHTML">
+                    {% for item in platforms %}<option value="{{ item }}" {% if item == platform %}selected{% endif %}>{{ item }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="edit-field create-field">
+                <label for="new-tracking">包裹單號</label>
+                <input id="new-tracking" name="tracking_number" type="text" value="{{ tracking_number }}" maxlength="50" placeholder="輸入物流單號" autocomplete="off">
+            </div>
+            <div class="edit-field create-field">
+                <label for="new-amount">訂單金額（人民幣）</label>
+                <input id="new-amount" name="amount_rmb" type="number" value="{{ amount_rmb }}" min="0" max="99999999.99" step="0.01" required
+                       hx-get="/orders/new/fee" hx-trigger="input changed delay:350ms" hx-include="#create-order-form" hx-target="#fee-preview" hx-swap="innerHTML">
+            </div>
+            <div class="edit-field create-field">
+                <label for="new-weight">包裹公斤數</label>
+                <input id="new-weight" name="weight_kg" type="number" value="{{ weight_kg }}" min="0" max="99999999.99" step="0.01" required>
+            </div>
+        </div>
+        <div class="create-fee-area">
+            <div class="create-heading">代購手續費</div>
+            <div id="fee-preview">
+                {% include "new_order_fee.html" %}
+            </div>
+            <div class="create-hint">以送出時的姓名／會員等級／金額／平台重新計算，集運手續費為 0；不會採用畫面上過時的預覽數字。</div>
+        </div>
+        <div class="edit-status-box create-status">
+            <label class="edit-checkbox"><input type="checkbox" name="is_arrived" value="1" {% if is_arrived %}checked{% endif %}> 已到貨</label>
+            <label class="edit-checkbox"><input type="checkbox" name="is_returned" value="1" {% if is_returned %}checked{% endif %}> 已運回</label>
+        </div>
+        <div class="edit-field edit-remarks create-field">
+            <label for="new-remarks">備註（選填）</label>
+            <textarea name="remarks" id="new-remarks" rows="3" placeholder="輸入備註">{{ remarks }}</textarea>
+        </div>
+        <div class="create-footer">
+            <label class="edit-checkbox"><input type="checkbox" name="keep_last_name" value="1" {% if keep_last_name %}checked{% endif %}> 新增後保留此客戶姓名</label>
+            <div class="create-actions"><span id="create-loading" class="htmx-indicator">新增中…</span><button type="submit" class="edit-save">✅ 新增訂單</button></div>
+        </div>
+    </form>
+</section>
