@@ -2169,3 +2169,30 @@ body {
     }
 
 }
+
+
+/* ======================================================
+   新增訂單（沿用既有後台配色）
+====================================================== */
+.create-card { margin-top: 26px; padding: 26px; background: #fff; border: 1px solid #eee; border-radius: 16px; }
+.create-heading { font-size: 16px; font-weight: 700; margin-bottom: 18px; }
+.create-field { min-width: 0; }
+.create-field select { width: 100%; padding: 11px 12px; border: 1px solid #ddd; border-radius: 9px; background: white; min-height: 46px; }
+.create-hint { color: #888; font-size: 12px; margin: 7px 0 0; line-height: 1.6; }
+.required { color: #df6b4f; }
+.create-fee-area { border-top: 1px solid #eee; margin-top: 26px; padding-top: 25px; }
+.create-fee-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
+.create-fee-summary > div { border: 1px solid #eee; border-radius: 10px; padding: 15px; background: #fafafa; }
+.create-fee-summary small { display: block; color: #888; margin-bottom: 7px; }
+.create-fee-summary strong { display: block; font-size: 18px; }
+.create-fee-summary .create-fee-total { background: #fff4e8; border-color: #f2dfc6; color: #b96b14; }
+.create-fee-error { padding: 14px; background: #fff1f1; border-radius: 10px; color: #b94949; }
+.create-status { margin-top: 24px; }
+.create-footer { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-top: 22px; flex-wrap: wrap; }
+.create-actions { display: flex; align-items: center; gap: 14px; }
+.create-success, .create-error { margin-top: 24px; padding: 15px 20px; border: 1px solid #b8dec7; background: #ebf7ef; border-radius: 12px; color: #277047; }
+.create-success a { margin-left: 12px; color: inherit; text-decoration: underline; }
+.create-error { background: #fff0f0; border-color: #f1c5c5; color: #bb4d4d; }
+.audit-create { background: #e7f7ed; color: #328652; }
+@media(max-width:1050px) { .create-fee-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media(max-width:650px) { .create-fee-summary { grid-template-columns: 1fr; } .create-card { padding: 18px; } .create-footer { align-items: stretch; flex-direction: column; } .create-actions .edit-save { width: 100%; } }
