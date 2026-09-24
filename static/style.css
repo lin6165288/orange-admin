@@ -2226,3 +2226,61 @@ body {
 .inbound-hidden { display:none; }
 .inbound-split { display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap; }
 @media(max-width:650px) { .inbound-card { padding:17px; } .inbound-actions {justify-content:stretch;} .inbound-actions button{flex:1;} }
+
+/* 出貨管理 - 第一版 */
+.ship-card { background:white; border:1px solid #eee; border-radius:16px; padding:22px; margin-top:22px; }
+.ship-card h2 {font-size:19px;font-weight:700;margin:0 0 12px;}
+.ship-muted {font-size:13px;color:#888;line-height:1.65;}
+.ship-filter {display:grid;gap:14px;}
+.ship-modes,.ship-options {display:flex;gap:18px;align-items:center;flex-wrap:wrap;}
+.ship-modes label,.ship-options label,.ship-select-all {display:flex;align-items:center;gap:7px;font-size:14px;cursor:pointer;}
+.ship-card input[type=checkbox],.ship-card input[type=radio] {accent-color:#ed922e;width:17px;height:17px;}
+.ship-name-label {font-size:13px;color:#777;}
+.ship-input {min-height:44px;border:1px solid #ddd;border-radius:9px;padding:10px 12px;width:100%;}
+.ship-options .ship-primary {margin-left:auto;}
+.ship-primary {background:#f29a38;color:white;border:0;padding:11px 20px;border-radius:9px;font-weight:600;cursor:pointer;}
+.ship-primary:hover {background:#e68c28;}
+.ship-primary:disabled {opacity:.5;cursor:wait;}
+.ship-metrics {display:flex;gap:15px;flex-wrap:wrap;margin-top:24px;}
+.ship-metric {background:#fff;border:1px solid #eee;border-radius:14px;padding:15px 21px;min-width:160px;}
+.ship-metric span {display:block;color:#888;font-size:13px;margin-bottom:5px;}
+.ship-metric strong {font-size:23px;}
+.ship-metric small {font-size:13px;color:#999;font-weight:400;}
+.ship-msg {padding:13px 17px;border-radius:10px;margin-top:20px;line-height:1.6;}
+.ship-error {color:#9c3c3c;background:#fff0f0;}
+.ship-success {color:#296e40;background:#e9f7ed;}
+.ship-warning {color:#975d15;background:#fff4df;}
+.ship-header,.ship-footer {display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap;}
+.ship-actions {display:flex;gap:10px;align-items:center;}
+.ship-actions select {min-height:43px;padding:9px;border:1px solid #ddd;border-radius:9px;background:white;max-width:220px;}
+.ship-footer {margin-top:18px;}
+.ship-table-wrap {overflow:auto;border:1px solid #eee;border-radius:10px;margin-top:15px;}
+.ship-table {border-collapse:collapse;min-width:850px;width:100%;font-size:14px;}
+.ship-table th,.ship-table td {text-align:left;padding:12px 13px;border-bottom:1px solid #eee;vertical-align:middle;}
+.ship-table th {background:#fafafa;color:#777;font-size:13px;font-weight:500;}
+.ship-table tr:last-child td {border-bottom:0;}
+.ship-table .ship-customer {font-weight:600;}
+.ship-tracking {word-break:break-all;}
+.ship-tag {display:inline-block;font-size:12px;padding:4px 8px;margin:2px 2px 2px 0;border-radius:999px;background:#f1f2f4;color:#666;white-space:nowrap;}
+.ship-tag.ready {background:#fff0d7;color:#8d5d20;}
+.ship-tag.early {background:#f1eafe;color:#7145a2;}
+.ship-tag.delay {background:#fff0f0;color:#ac4545;}
+.ship-tag.notified {background:#e8f7ef;color:#32734b;}
+.ship-empty {text-align:center;color:#888;padding:40px;}
+.ship-summary summary {cursor:pointer;color:#555;font-weight:600;}
+.ship-mini-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:15px;}
+.ship-mini-item {display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid #eee;border-radius:10px;}
+.ship-mini-item span {color:#888;font-size:13px;}
+@media(max-width:800px) {.ship-mini-grid {grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:650px) {.ship-card{padding:17px}.ship-options .ship-primary{margin-left:0;width:100%}.ship-mini-grid{grid-template-columns:1fr}.ship-actions{width:100%}.ship-actions select{flex:1;min-width:0}.ship-actions button{white-space:nowrap}}
+
+/* 出貨運費摘要：分客戶／純集運／代購各自計費 */
+.ship-fee-metric { background:#fff8ed; border-color:#f5dcb8; }
+.ship-fee-metric strong { color:#b96b14; }
+.ship-fee-hint { margin:12px 0 2px; }
+.ship-fee-table-wrap { overflow:auto; border:1px solid #eee; border-radius:10px; margin-top:12px; }
+.ship-fee-table { width:100%; border-collapse:collapse; min-width:950px; font-size:13px; }
+.ship-fee-table th,.ship-fee-table td { padding:12px; border-bottom:1px solid #eee; text-align:left; vertical-align:middle; }
+.ship-fee-table th { background:#fafafa; color:#777; font-weight:500; }
+.ship-fee-table tr:last-child td { border-bottom:0; }
+.ship-fee-total { font-weight:700; color:#b96b14; white-space:nowrap; }
