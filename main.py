@@ -1,6 +1,7 @@
 import os
 import json
 import secrets
+import threading
 
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
@@ -24,6 +25,7 @@ from fastapi.security import (
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import RedirectResponse
 
 
 # =========================================================
@@ -208,6 +210,15 @@ def fetch_order(
 # =========================================================
 # Customer Suggestions
 # =========================================================
+
+def fetch_locked_order(cursor, order_id: int):
+    # SELECT * keeps new order columns in future audit snapshots as well.
+    cursor.execute(
+        "SELECT * FROM orders WHERE order_id = %s FOR UPDATE",
+        (order_id,)
+    )
+    return cursor.fetchone()
+
 
 def fetch_customer_names():
 
@@ -687,6 +698,31 @@ def ensure_audit_table(
     )
 
 
+# MySQL CREATE TABLE can implicitly commit. Never run it in an order change transaction.
+_audit_table_ready = False
+_audit_table_lock = threading.Lock()
+
+
+def ensure_audit_storage():
+    global _audit_table_ready
+    if _audit_table_ready:
+        return
+    with _audit_table_lock:
+        if _audit_table_ready:
+            return
+        conn = get_db()
+        try:
+            with conn.cursor() as cursor:
+                ensure_audit_table(cursor)
+            conn.commit()
+            _audit_table_ready = True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
 def order_to_json(
     data
 ):
@@ -715,11 +751,6 @@ def write_audit_log(
 
     after_data=None
 ):
-
-    ensure_audit_table(
-        cursor
-    )
-
 
     cursor.execute(
         """
@@ -1169,17 +1200,6 @@ async def update_order(
     # Old Order
     # =====================================================
 
-    old_order = fetch_order(
-        order_id
-    )
-
-
-    if not old_order:
-
-        raise HTTPException(
-            status_code=404,
-            detail="找不到訂單"
-        )
 
 
     # =====================================================
@@ -1352,12 +1372,18 @@ async def update_order(
     # Transaction
     # =====================================================
 
+    ensure_audit_storage()
+
     conn = get_db()
 
 
     try:
 
         with conn.cursor() as cursor:
+            old_order = fetch_locked_order(cursor, order_id)
+            if not old_order:
+                raise HTTPException(status_code=404, detail="找不到訂單")
+
 
 
             # Update
@@ -1394,48 +1420,8 @@ async def update_order(
             )
 
 
-            # Fetch new version
-            cursor.execute(
-                """
-                SELECT
-                    order_id,
-                    order_time,
-                    customer_name,
-                    platform,
-                    tracking_number,
-                    amount_rmb,
-                    weight_kg,
-                    is_arrived,
-                    is_returned,
-                    remarks,
-                    service_fee,
-                    early_return,
-                    is_early_returned,
-                    reconcile_enabled,
-                    exchange_rate,
-                    member_level_snapshot,
-                    original_service_fee,
-                    vip_discount_rate,
-                    final_service_fee,
-                    extra_discount,
-                    order_status,
-                    cancel_note
-
-                FROM orders
-
-                WHERE order_id = %s
-
-                LIMIT 1
-                """,
-                (
-                    order_id,
-                )
-            )
-
-
-            new_order = (
-                cursor.fetchone()
-            )
+            # Keep the complete after snapshot (including future columns).
+            new_order = fetch_locked_order(cursor, order_id)
 
 
             # Audit
@@ -1576,18 +1562,9 @@ async def delete_order(
     )
 ):
 
-    old_order = fetch_order(
-        order_id
-    )
 
 
-    if not old_order:
-
-        raise HTTPException(
-            status_code=404,
-            detail="找不到訂單"
-        )
-
+    ensure_audit_storage()
 
     conn = get_db()
 
@@ -1595,6 +1572,10 @@ async def delete_order(
     try:
 
         with conn.cursor() as cursor:
+            old_order = fetch_locked_order(cursor, order_id)
+            if not old_order:
+                raise HTTPException(status_code=404, detail="找不到訂單")
+
 
 
             # Audit first
@@ -1630,6 +1611,8 @@ async def delete_order(
                     order_id,
                 )
             )
+            if cursor.rowcount != 1:
+                raise HTTPException(status_code=409, detail="訂單已被其他操作移除")
 
 
         conn.commit()
@@ -1713,173 +1696,178 @@ async def delete_order(
 
 
 # =========================================================
-# Audit Logs
+# Audit Logs / Restore
 # =========================================================
 
-@app.get(
-    "/audit-logs"
-)
+@app.get("/audit-logs")
 async def audit_logs_page(
-
     request: Request,
-
-    admin: str = Depends(
-        verify_admin
-    )
+    restored: str = "",
+    admin: str = Depends(verify_admin),
 ):
-
+    ensure_audit_storage()
     conn = get_db()
-
-
     try:
-
         with conn.cursor() as cursor:
-
-
-            ensure_audit_table(
-                cursor
-            )
-
-
             cursor.execute(
-                """
-                SELECT
-                    id,
-                    order_id,
-                    action,
-                    admin_username,
-                    before_data,
-                    after_data,
-                    created_at
-
-                FROM order_audit_logs
-
-                ORDER BY
-                    id DESC
-
-                LIMIT 300
-                """
+                """SELECT id, order_id, action, admin_username,
+                          before_data, after_data, created_at
+                   FROM order_audit_logs ORDER BY id DESC LIMIT 300"""
             )
-
-
             rows = cursor.fetchall()
-
-
-        conn.commit()
-
-
+            # Include older restores outside the 300 most recent records.
+            cursor.execute(
+                """SELECT order_id, before_data FROM order_audit_logs
+                   WHERE action = 'RESTORE'"""
+            )
+            restore_rows = cursor.fetchall()
+            # Current presence determines whether a delete is already restored.
+            deleted_ids = [row["order_id"] for row in rows if row["action"] == "DELETE"]
+            existing_order_ids = set()
+            if deleted_ids:
+                placeholders = ",".join(["%s"] * len(deleted_ids))
+                cursor.execute(
+                    f"SELECT order_id FROM orders WHERE order_id IN ({placeholders})",
+                    deleted_ids,
+                )
+                existing_order_ids = {r["order_id"] for r in cursor.fetchall()}
     finally:
-
         conn.close()
 
+    restored_log_ids = set()
+    for record in restore_rows:
+        ref = parse_audit_json(record["before_data"]).get("delete_log_id")
+        if isinstance(ref, int):
+            restored_log_ids.add(ref)
 
     logs = []
-
-
     for row in rows:
-
-
-        before_data = (
-            parse_audit_json(
-                row["before_data"]
-            )
-        )
-
-
-        after_data = (
-            parse_audit_json(
-                row["after_data"]
-            )
-        )
-
-
+        before_data = parse_audit_json(row["before_data"])
+        after_data = parse_audit_json(row["after_data"])
         changes = []
-
-
         if row["action"] == "UPDATE":
-
-
-            for (
-                field,
-                label
-            ) in AUDIT_FIELD_LABELS.items():
-
-
-                before_value = (
-                    before_data.get(
-                        field
-                    )
-                )
-
-
-                after_value = (
-                    after_data.get(
-                        field
-                    )
-                )
-
-
-                if str(
-                    before_value
-                ) != str(
-                    after_value
-                ):
-
-                    changes.append(
-                        {
-                            "field":
-                                field,
-
-                            "label":
-                                label,
-
-                            "before":
-                                display_audit_value(
-                                    before_value
-                                ),
-
-                            "after":
-                                display_audit_value(
-                                    after_value
-                                )
-                        }
-                    )
-
-
-        logs.append(
-            {
-                "id":
-                    row["id"],
-
-                "order_id":
-                    row["order_id"],
-
-                "action":
-                    row["action"],
-
-                "admin_username":
-                    row["admin_username"],
-
-                "created_at":
-                    row["created_at"],
-
-                "before":
-                    before_data,
-
-                "after":
-                    after_data,
-
-                "changes":
-                    changes
-            }
-        )
-
+            for field, label in AUDIT_FIELD_LABELS.items():
+                original = before_data.get(field)
+                current = after_data.get(field)
+                if str(original) != str(current):
+                    changes.append({
+                        "field": field,
+                        "label": label,
+                        "before": display_audit_value(original),
+                        "after": display_audit_value(current),
+                    })
+        logs.append({
+            **row,
+            "before": before_data,
+            "after": after_data,
+            "changes": changes,
+            "was_restored": row["id"] in restored_log_ids,
+            "order_exists": row["order_id"] in existing_order_ids,
+        })
 
     return templates.TemplateResponse(
         request=request,
         name="audit_logs.html",
-        context={
-            "logs":
-                logs
-        }
+        context={"logs": logs, "restored": restored},
     )
+
+
+def _check_same_origin(request: Request):
+    # Basic Auth credentials may be sent by browsers automatically; prevent cross-site form POSTs.
+    source = request.headers.get("origin") or request.headers.get("referer")
+    if not source:
+        raise HTTPException(status_code=403, detail="缺少來源資訊，請從操作紀錄頁按復原")
+    parsed = urlparse(source)
+    expected_host = request.headers.get("host", "").lower()
+    if parsed.scheme != "https" or parsed.netloc.lower() != expected_host:
+        raise HTTPException(status_code=403, detail="僅允許從同一個後台網址操作")
+
+
+@app.post("/audit-logs/{audit_id}/restore")
+async def restore_deleted_order(
+    request: Request,
+    audit_id: int,
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_audit_storage()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            # Lock this specific deletion record to serialize two simultaneous restore clicks.
+            cursor.execute(
+                """SELECT id, order_id, action, before_data
+                   FROM order_audit_logs WHERE id = %s FOR UPDATE""",
+                (audit_id,),
+            )
+            deletion = cursor.fetchone()
+            if not deletion or deletion["action"] != "DELETE":
+                raise HTTPException(status_code=404, detail="找不到有效的刪除紀錄")
+
+            snapshot = parse_audit_json(deletion["before_data"])
+            order_id = deletion["order_id"]
+            if not snapshot or snapshot.get("order_id") != order_id:
+                raise HTTPException(status_code=409, detail="刪除快照不完整，無法安全復原")
+
+            # Refuse reusing a past deletion log even if this order was subsequently deleted again.
+            cursor.execute(
+                """SELECT before_data FROM order_audit_logs
+                   WHERE action = 'RESTORE' AND order_id = %s""",
+                (order_id,),
+            )
+            for entry in cursor.fetchall():
+                if parse_audit_json(entry["before_data"]).get("delete_log_id") == audit_id:
+                    raise HTTPException(status_code=409, detail="這筆刪除紀錄已經復原過")
+
+            cursor.execute(
+                "SELECT order_id FROM orders WHERE order_id = %s FOR UPDATE",
+                (order_id,),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="相同訂單編號已存在，未覆蓋現有訂單")
+
+            cursor.execute("SHOW COLUMNS FROM orders")
+            schema = cursor.fetchall()
+            live_columns = {
+                c["Field"] for c in schema
+                if "GENERATED" not in (c.get("Extra") or "").upper()
+            }
+            # A partial/outdated snapshot must not silently produce a different order.
+            if set(snapshot) != live_columns:
+                raise HTTPException(
+                    status_code=409,
+                    detail="刪除時的欄位與目前訂單表不同；請先備份並人工確認，未執行復原",
+                )
+
+            fields = [col["Field"] for col in schema if col["Field"] in live_columns]
+            columns_sql = ", ".join("`" + field.replace("`", "``") + "`" for field in fields)
+            placeholders = ", ".join(["%s"] * len(fields))
+            cursor.execute(
+                f"INSERT INTO orders ({columns_sql}) VALUES ({placeholders})",
+                [snapshot[field] for field in fields],
+            )
+            new_order = fetch_locked_order(cursor, order_id)
+            write_audit_log(
+                cursor=cursor,
+                order_id=order_id,
+                action="RESTORE",
+                admin_username=admin,
+                before_data={"delete_log_id": audit_id},
+                after_data=new_order,
+            )
+        conn.commit()
+    except HTTPException:
+        conn.rollback()
+        raise
+    except pymysql.err.IntegrityError as exc:
+        conn.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="復原與現有資料限制衝突（可能是編號、單號或關聯資料），未修改任何訂單",
+        ) from exc
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return RedirectResponse(url=f"/audit-logs?restored={order_id}", status_code=303)
