@@ -3,8 +3,9 @@ import json
 import secrets
 import threading
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional
 from urllib.parse import urlparse, unquote
 
@@ -1871,3 +1872,236 @@ async def restore_deleted_order(
     finally:
         conn.close()
     return RedirectResponse(url=f"/audit-logs?restored={order_id}", status_code=303)
+
+
+# =========================================================
+# 新增訂單（與舊 Streamlit 的新增訂單公式一致）
+# =========================================================
+
+ORDER_PLATFORMS = (
+    "集運", "拼多多", "淘寶", "閒魚", "1688", "微店",
+    "小紅書", "抖音", "京東", "得物",
+)
+VIP_DISCOUNT = {
+    "一般會員": Decimal("1.00"),
+    "VIP1": Decimal("0.90"),
+    "VIP2": Decimal("0.85"),
+    "VIP3": Decimal("0.80"),
+}
+
+
+def member_level_for_name(cursor, name: str) -> str:
+    if not name:
+        return "一般會員"
+    cursor.execute(
+        "SELECT member_level FROM members WHERE customer_name = %s LIMIT 1",
+        (name,),
+    )
+    member = cursor.fetchone()
+    return str(member["member_level"]) if member and member.get("member_level") else "一般會員"
+
+
+def calculate_add_fee(amount: Decimal, level: str, platform: str):
+    """舊 app.py：集運免費；其餘 1–499→30、500–999→50、之後每 500 +50。
+    舊版以 round() 做整數台幣銀行家捨入，這裡使用 Decimal ROUND_HALF_EVEN。
+    """
+    discount = VIP_DISCOUNT.get(level, Decimal("1.00"))
+    if platform == "集運":
+        return Decimal("0"), Decimal("0"), discount
+    base = Decimal("30") if amount < 500 else Decimal(int(amount // 500) * 50)
+    fee = (base * discount).quantize(Decimal("1"), rounding=ROUND_HALF_EVEN)
+    return base, fee, discount
+
+
+def valid_add_amount(raw: str, field: str, max_value: str) -> Decimal:
+    try:
+        value = Decimal(str(raw).strip())
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=422, detail=f"{field}格式不正確")
+    if not value.is_finite() or value < 0 or value > Decimal(max_value):
+        raise HTTPException(status_code=422, detail=f"{field}超出可接受範圍")
+    if value.as_tuple().exponent < -2:
+        raise HTTPException(status_code=422, detail=f"{field}最多兩位小數")
+    return value.quantize(Decimal("0.01"))
+
+
+def add_order_context(**updates):
+    state = {
+        "order_time": datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat(),
+        "customer_name": "",
+        "platform": "集運",
+        "tracking_number": "",
+        "amount_rmb": "0.00",
+        "weight_kg": "0.00",
+        "is_arrived": False,
+        "is_returned": False,
+        "remarks": "",
+        "keep_last_name": True,
+        "success_id": None,
+        "error_message": "",
+    }
+    state.update(updates)
+    return state
+
+
+def new_order_page_context(**updates):
+    context = add_order_context(**updates)
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT customer_name FROM members WHERE customer_name IS NOT NULL "
+                "AND TRIM(customer_name) <> '' "
+                "UNION SELECT DISTINCT customer_name FROM orders "
+                "WHERE customer_name IS NOT NULL AND TRIM(customer_name) <> '' "
+                "ORDER BY customer_name"
+            )
+            context["customer_names"] = [r["customer_name"] for r in cursor.fetchall()]
+            context["member_level"] = member_level_for_name(cursor, context["customer_name"])
+    finally:
+        conn.close()
+    context["platforms"] = ORDER_PLATFORMS
+    amount = context["amount_rmb"]
+    try:
+        amount_dec = valid_add_amount(str(amount), "人民幣金額", "99999999.99")
+        base, fee, discount = calculate_add_fee(
+            amount_dec, context["member_level"], context["platform"]
+        )
+        context.update({"base_fee": base, "calculated_fee": fee, "vip_discount": discount})
+    except HTTPException:
+        context.update({"base_fee": None, "calculated_fee": None, "vip_discount": None})
+    return context
+
+
+@app.get("/orders/new")
+def new_order_page(request: Request, admin: str = Depends(verify_admin)):
+    return templates.TemplateResponse(
+        request=request, name="new_order.html", context=new_order_page_context()
+    )
+
+
+@app.get("/orders/new/fee")
+def new_order_fee(
+    request: Request,
+    customer_name: str = "",
+    platform: str = "集運",
+    amount_rmb: str = "0",
+    admin: str = Depends(verify_admin),
+):
+    if platform not in ORDER_PLATFORMS:
+        return templates.TemplateResponse(
+            request=request, name="new_order_fee.html",
+            context={"error_message": "請選擇有效的平台"},
+        )
+    try:
+        amount = valid_add_amount(amount_rmb or "0", "人民幣金額", "99999999.99")
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            request=request, name="new_order_fee.html",
+            context={"error_message": exc.detail},
+        )
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            level = member_level_for_name(cursor, customer_name.strip())
+    finally:
+        conn.close()
+    base, fee, discount = calculate_add_fee(amount, level, platform)
+    return templates.TemplateResponse(
+        request=request, name="new_order_fee.html",
+        context={"member_level": level, "base_fee": base,
+                 "calculated_fee": fee, "vip_discount": discount,
+                 "error_message": ""},
+    )
+
+
+@app.post("/orders/new")
+def create_order(
+    request: Request,
+    order_time: str = Form(""),
+    customer_name: str = Form(""),
+    platform: str = Form("集運"),
+    tracking_number: str = Form(""),
+    amount_rmb: str = Form("0"),
+    weight_kg: str = Form("0"),
+    is_arrived: Optional[str] = Form(None),
+    is_returned: Optional[str] = Form(None),
+    remarks: str = Form(""),
+    keep_last_name: Optional[str] = Form(None),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    name = customer_name.strip()
+    tracking = tracking_number.strip()
+    notes = remarks.strip()
+    keep_name = keep_last_name == "1"
+    inputs = dict(order_time=order_time, customer_name=name, platform=platform,
+                  tracking_number=tracking, amount_rmb=amount_rmb,
+                  weight_kg=weight_kg, is_arrived=is_arrived == "1",
+                  is_returned=is_returned == "1", remarks=remarks,
+                  keep_last_name=keep_name)
+
+    def bad(message):
+        return templates.TemplateResponse(
+            request=request, name="new_order_panel.html",
+            context=new_order_page_context(**inputs, error_message=message),
+            status_code=200,  # HTMX replaces the form with a visible validation message.
+        )
+
+    if not name or len(name) > 50:
+        return bad("請輸入客戶姓名（最多 50 字）")
+    if platform not in ORDER_PLATFORMS:
+        return bad("請選擇有效的平台")
+    if len(tracking) > 50:
+        return bad("物流單號最多 50 字")
+    if len(notes) > 65535:
+        return bad("備註內容過長")
+    try:
+        date_value = datetime.strptime(order_time, "%Y-%m-%d").date()
+    except ValueError:
+        return bad("下單日期格式不正確")
+    try:
+        amount = valid_add_amount(amount_rmb, "人民幣金額", "99999999.99")
+        weight = valid_add_amount(weight_kg, "重量", "99999999.99")
+    except HTTPException as exc:
+        return bad(exc.detail)
+
+    # DDL should not run in an order transaction; fail closed if auditing is unavailable.
+    ensure_audit_storage()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            level = member_level_for_name(cursor, name)
+            original_fee, fee, discount = calculate_add_fee(amount, level, platform)
+            # Mirror the old Streamlit INSERT column set and recompute the fee server-side.
+            cursor.execute(
+                """INSERT INTO orders
+                   (order_time, customer_name, platform, tracking_number,
+                    amount_rmb, weight_kg, is_arrived, is_returned, service_fee, remarks)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (date_value, name, platform, tracking or None, amount, weight,
+                 int(is_arrived == "1"), int(is_returned == "1"), fee, notes or None),
+            )
+            new_id = cursor.lastrowid
+            cursor.execute(
+                "INSERT IGNORE INTO members (customer_name) VALUES (%s)",
+                (name,),
+            )
+            new_order = fetch_locked_order(cursor, new_id)
+            if not new_order:
+                raise RuntimeError("新增後無法讀取訂單，已取消交易")
+            write_audit_log(cursor, new_id, "CREATE", admin, None, new_order)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return templates.TemplateResponse(
+        request=request,
+        name="new_order_panel.html",
+        context=new_order_page_context(
+            order_time=order_time, customer_name=name if keep_name else "",
+            platform=platform, keep_last_name=keep_name, success_id=new_id,
+        ),
+    )
