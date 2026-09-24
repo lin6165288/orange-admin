@@ -52,6 +52,8 @@
 
                     {% if log.action == "RESTORE" %}
                         <span class="audit-action audit-update">復原</span>
+                    {% elif log.action == "CREATE" %}
+                        <span class="audit-action audit-create">新增</span>
                     {% elif log.action == "DELETE" %}
 
                         <span class="audit-action audit-delete">
@@ -91,6 +93,15 @@
 
             {% if log.action == "RESTORE" %}
                 <div class="audit-empty">↩ 已由刪除紀錄 #{{ log.before.get('delete_log_id', '—') }} 復原；客戶：{{ log.after.get('customer_name', '—') }}</div>
+            {% elif log.action == "CREATE" %}
+                <div class="deleted-order-summary">
+                    <div><span>客戶</span><strong>{{ log.after.get('customer_name', '—') }}</strong></div>
+                    <div><span>日期</span><strong>{{ log.after.get('order_time', '—') }}</strong></div>
+                    <div><span>平台</span><strong>{{ log.after.get('platform', '—') }}</strong></div>
+                    <div><span>物流單號</span><strong>{{ log.after.get('tracking_number') or '—' }}</strong></div>
+                    <div><span>人民幣</span><strong>¥{{ log.after.get('amount_rmb', '—') }}</strong></div>
+                    <div><span>重量</span><strong>{{ log.after.get('weight_kg', '—') }} kg</strong></div>
+                </div>
             {% elif log.action == "UPDATE" %}
 
 
