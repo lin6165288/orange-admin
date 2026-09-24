@@ -33,10 +33,24 @@
 <details class="ship-card ship-summary" open>
   <summary>📋 各客戶包裹與國際運費（{{ groups|length }} 位）</summary>
   <p class="ship-muted ship-fee-hint">每位客戶分開計算：純集運（平台＝集運）合併重量後每 0.5 kg 進位、最低 1 kg，NT$90/kg；代購（其他平台）合併重量後每 0.5 kg 進位、最低 0.5 kg，NT$70/kg。兩類分別計費再相加。重量尚未登記（0 kg）的類別暫不估價，並非免運費。</p>
+  <form id="ship-customer-export" action="/shipping/export" method="post" target="_blank" onsubmit="return shipCheckCustomers(this)">
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <input type="hidden" name="customer" value="{{ customer }}">
+    {% if hide_delayed %}<input type="hidden" name="hide_delayed" value="1">{% endif %}
+    {% if hide_notified %}<input type="hidden" name="hide_notified" value="1">{% endif %}
+    <div class="ship-export-toolbar">
+      <label class="ship-select-all"><input type="checkbox" onchange="this.closest('form').querySelectorAll('input[name=selected_customers]').forEach(x => x.checked = this.checked)"> 全選本頁客戶</label>
+      <div class="ship-export-buttons">
+        <button type="submit" name="export_kind" value="customer_summary" class="ship-export-btn">📥 匯出勾選客戶統整 Excel</button>
+        <button type="submit" name="export_kind" value="customer_details" class="ship-export-btn">📥 匯出勾選客戶訂單明細 Excel</button>
+      </div>
+    </div>
+    <p class="ship-muted">先勾選客戶再匯出。明細檔包含「訂單明細」及「客戶運費統整」兩張工作表；只匯出目前頁面的未運回包裹。</p>
   <div class="ship-fee-table-wrap"><table class="ship-fee-table">
-  <thead><tr><th>客戶</th><th>未運回件數 / 實重</th><th>純集運（件 / 實重 → 計費重 / 運費）</th><th>代購（件 / 實重 → 計費重 / 運費）</th><th>合計國際運費</th></tr></thead>
+  <thead><tr><th>選取</th><th>客戶</th><th>未運回件數 / 實重</th><th>純集運（件 / 實重 → 計費重 / 運費）</th><th>代購（件 / 實重 → 計費重 / 運費）</th><th>合計國際運費</th></tr></thead>
   <tbody>{% for group in groups %}
     <tr>
+      <td><input type="checkbox" name="selected_customers" value="{{ group.name }}" aria-label="勾選客戶 {{ group.name }}"></td>
       <td class="ship-customer">{{ group.name }}</td>
       <td>{{ group.count }} 件 / {{ '%.2f'|format(group.weight) }} kg</td>
       <td>{% if group.forwarding_count %}{{ group.forwarding_count }} 件 / {{ '%.2f'|format(group.forwarding_weight) }} kg → {{ '%.2f'|format(group.forwarding_billed_weight) }} kg / NT$ {{ '%.0f'|format(group.forwarding_fee) }}{% else %}—{% endif %}</td>
@@ -44,12 +58,21 @@
       <td class="ship-fee-total">NT$ {{ '%.0f'|format(group.total_fee) }}</td>
     </tr>{% endfor %}
   </tbody></table></div>
+  </form>
 </details>
 {% endif %}
 {% if rows %}
 <section class="ship-card">
   <div class="ship-header"><h2>訂單清單</h2><span class="ship-muted">每批最多選 100 筆；已運回訂單不會出現在此清單，只會修改勾選的訂單。</span></div>
-  <form hx-post="/shipping/apply" hx-target="#shipping-body" hx-swap="innerHTML"
+  <form id="ship-order-export" action="/shipping/export" method="post" target="_blank">
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <input type="hidden" name="customer" value="{{ customer }}">
+    {% if hide_delayed %}<input type="hidden" name="hide_delayed" value="1">{% endif %}
+    {% if hide_notified %}<input type="hidden" name="hide_notified" value="1">{% endif %}
+    <input type="hidden" name="export_kind" value="selected_orders">
+    <div id="ship-export-selected"></div>
+  </form>
+  <form id="ship-action-form" hx-post="/shipping/apply" hx-target="#shipping-body" hx-swap="innerHTML"
         hx-confirm="確定要批次更新勾選的訂單嗎？更新後會同步寫入操作紀錄。">
     <input type="hidden" name="mode" value="{{ mode }}">
     <input type="hidden" name="customer" value="{{ customer }}">
@@ -74,10 +97,12 @@
     </tr>
     {% endfor %}
     </tbody></table></div>
-    <p class="ship-muted">「標記已運回」只允許已到貨、未延後的訂單；「提前運回」可先標記，等到貨後才會進入可出貨名單。</p>
+    <p class="ship-muted">匯出勾選訂單的運費統整僅按「這次選取的訂單」重新合重計費，不等於客戶所有包裹的完整運費。「標記已運回」只允許已到貨、未延後的訂單。</p>
     <div class="ship-footer">
       <label class="ship-select-all"><input type="checkbox" onchange="this.closest('form').querySelectorAll('input[name=selected_order_ids]').forEach(x => x.checked = this.checked)"> 全選本頁（最多 100 筆可送出）</label>
-      <div class="ship-actions"><select name="action" required aria-label="批次操作">
+      <div class="ship-actions">
+        <button type="button" class="ship-export-btn" onclick="shipExportOrders()">📥 匯出勾選訂單 Excel</button>
+        <select name="action" required aria-label="批次操作">
         <option value="">選擇批次操作</option>
         {% for action_key,action_name in actions.items() %}<option value="{{ action_key }}">{{ action_name }}</option>{% endfor %}
       </select><button type="submit" class="ship-primary">確認更新</button></div>
@@ -86,3 +111,29 @@
 </section>
 {% else %}<div class="ship-card ship-empty">目前沒有符合條件的訂單。</div>{% endif %}
 {% endif %}
+
+<script>
+function shipCheckCustomers(form) {
+  if (!form.querySelector('input[name="selected_customers"]:checked')) {
+    alert('請先勾選至少一位客戶。');
+    return false;
+  }
+  return true;
+}
+function shipExportOrders() {
+  const selected = [...document.querySelectorAll('#ship-action-form input[name="selected_order_ids"]:checked')];
+  if (!selected.length) { alert('請先勾選至少一筆訂單。'); return; }
+  const form = document.getElementById('ship-order-export');
+  const holder = document.getElementById('ship-export-selected');
+  if (!form || !holder) return;
+  holder.replaceChildren();
+  for (const item of selected) {
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'selected_order_ids';
+    hidden.value = item.value;
+    holder.appendChild(hidden);
+  }
+  form.submit();
+}
+</script>
