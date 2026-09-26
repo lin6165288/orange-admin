@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}匿名回饋｜橘貓代購{% endblock %}
+{% block content %}
+<div class="page-header feedback-page-title">
+  <div>
+    <h1><span class="page-title-icon"><i class="bi bi-chat-dots"></i></span>匿名回饋</h1>
+    <p>查看前台匿名回饋、搜尋內容與後台備註，並批次更新處理狀態。</p>
+  </div>
+</div>
+
+{% if message %}<div class="feedback-msg feedback-success"><i class="bi bi-check2-circle"></i><span>{{ message }}</span></div>{% endif %}
+{% if error %}<div class="feedback-msg feedback-error"><i class="bi bi-exclamation-triangle"></i><span>{{ error }}</span></div>{% endif %}
+
+<section class="feedback-filter-card">
+  <form method="get" action="/feedbacks" class="feedback-filter-grid">
+    <div class="search-field">
+      <label for="feedback-keyword">關鍵字</label>
+      <input id="feedback-keyword" type="text" name="keyword" value="{{ keyword }}" placeholder="搜尋回饋內容或後台備註" autocomplete="off">
+    </div>
+    <div class="search-field">
+      <label for="feedback-status">狀態</label>
+      <select id="feedback-status" name="status">
+        <option value="all" {% if status == 'all' %}selected{% endif %}>全部</option>
+        {% for item in feedback_statuses %}
+        <option value="{{ item }}" {% if status == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="feedback-filter-actions">
+      <a href="/feedbacks" class="clear-filter-button">清除條件</a>
+      <button type="submit" class="search-button"><i class="bi bi-search"></i><span>查詢</span></button>
+    </div>
+  </form>
+</section>
+
+<div class="feedback-summary-grid">
+  <div class="summary-card"><span>目前顯示</span><strong>{{ rows|length }}</strong><small> 筆</small></div>
+  <div class="summary-card"><span>未處理</span><strong>{{ counts.get('未處理', 0) }}</strong><small> 筆</small></div>
+  <div class="summary-card"><span>已讀</span><strong>{{ counts.get('已讀', 0) }}</strong><small> 筆</small></div>
+  <div class="summary-card"><span>已回覆</span><strong>{{ counts.get('已回覆', 0) }}</strong><small> 筆</small></div>
+  <div class="summary-card"><span>忽略</span><strong>{{ counts.get('忽略', 0) }}</strong><small> 筆</small></div>
+</div>
+
+<section class="feedback-card">
+  <form method="post" action="/feedbacks/apply" onsubmit="return feedbackConfirmApply(this)">
+    <input type="hidden" name="status_filter" value="{{ status }}">
+    <input type="hidden" name="keyword_filter" value="{{ keyword }}">
+
+    <div class="feedback-toolbar">
+      <label class="feedback-select-all"><input id="feedback-select-all" type="checkbox" onchange="feedbackToggleAll(this)"> 全選本頁</label>
+      <div class="feedback-batch-controls">
+        <select name="new_status" required>
+          <option value="">選擇批次狀態</option>
+          <option value="已讀">已讀</option>
+          <option value="已回覆">已回覆</option>
+          <option value="忽略">忽略</option>
+        </select>
+        <input type="text" name="staff_note" maxlength="65535" placeholder="後台備註（選填；有填會覆蓋原備註）">
+        <button type="submit" class="feedback-apply-btn"><i class="bi bi-check2-circle"></i><span>套用狀態</span></button>
+      </div>
+    </div>
+
+    {% if rows %}
+    <div class="feedback-table-wrap">
+      <table class="feedback-table">
+        <thead>
+          <tr><th>選取</th><th>ID</th><th>送出時間</th><th>回饋內容</th><th>狀態</th><th>後台備註</th></tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><input class="feedback-checkbox" type="checkbox" name="selected_feedback_ids" value="{{ row.id }}" onchange="feedbackSyncAll()" aria-label="選取回饋 {{ row.id }}"></td>
+            <td>#{{ row.id }}</td>
+            <td class="feedback-created-at">{{ row.created_at }}</td>
+            <td class="feedback-content">{{ row.content }}</td>
+            <td><span class="feedback-status status-{{ row.status }}">{{ row.status }}</span></td>
+            <td class="feedback-note">{{ row.staff_note or '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">目前沒有符合條件的匿名回饋。</div>
+    {% endif %}
+  </form>
+</section>
+
+<script>
+function feedbackToggleAll(master) {
+  document.querySelectorAll('.feedback-checkbox').forEach(x => x.checked = master.checked);
+}
+function feedbackSyncAll() {
+  const boxes = [...document.querySelectorAll('.feedback-checkbox')];
+  const master = document.getElementById('feedback-select-all');
+  if (!master || !boxes.length) return;
+  master.checked = boxes.every(x => x.checked);
+  master.indeterminate = !master.checked && boxes.some(x => x.checked);
+}
+function feedbackConfirmApply(form) {
+  const selected = [...form.querySelectorAll('.feedback-checkbox:checked')];
+  if (!selected.length) {
+    alert('請先勾選至少一筆匿名回饋。');
+    return false;
+  }
+  const status = form.querySelector('[name="new_status"]').value;
+  if (!status) {
+    alert('請先選擇要套用的狀態。');
+    return false;
+  }
+  return window.confirm(`確定要把 ${selected.length} 筆回饋更新為「${status}」嗎？`);
+}
+</script>
+{% endblock %}
