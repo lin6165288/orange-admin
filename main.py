@@ -302,257 +302,121 @@ def fetch_platforms():
 # =========================================================
 
 def query_orders(
-
     search_order_id="",
-
     search_customer_name="",
-
     search_tracking_number="",
-
     search_amount_rmb="",
-
     search_platform="",
-
     search_order_date="",
-
+    search_arrived_status="",
+    search_returned_status="",
     unreturned=""
 ):
+    """訂單管理查詢。
+
+    - 沒有任何篩選時：直接顯示最近 100 筆
+    - 有篩選時：最多顯示 300 筆
+    - unreturned 保留舊版相容性
+    """
 
     conditions = []
-
     params = []
+    search_error = ""
 
-
-    # =====================================================
-    # 訂單編號：精準搜尋
-    # =====================================================
-
-    search_order_id = str(
-        search_order_id or ""
-    ).strip()
+    search_order_id = str(search_order_id or "").strip()
+    search_customer_name = str(search_customer_name or "").strip()
+    search_tracking_number = str(search_tracking_number or "").strip()
+    search_amount_rmb = str(search_amount_rmb or "").strip()
+    search_platform = str(search_platform or "").strip()
+    search_order_date = str(search_order_date or "").strip()
+    search_arrived_status = str(search_arrived_status or "").strip()
+    search_returned_status = str(search_returned_status or "").strip()
+    unreturned = str(unreturned or "").strip()
 
     if search_order_id:
-
         try:
-
-            order_id_value = int(
-                search_order_id
-            )
-
+            order_id_value = int(search_order_id)
         except ValueError:
-
-            return {
-                "orders": [],
-                "total_count": 0,
-                "total_weight": 0
-            }
-
-
-        conditions.append(
-            "order_id = %s"
-        )
-
-        params.append(
-            order_id_value
-        )
-
-
-    # =====================================================
-    # 姓名：部分搜尋
-    # =====================================================
-
-    search_customer_name = (
-        search_customer_name or ""
-    ).strip()
+            search_error = "訂單編號只能輸入整數。"
+        else:
+            conditions.append("order_id = %s")
+            params.append(order_id_value)
 
     if search_customer_name:
-
-        conditions.append(
-            "customer_name LIKE %s"
-        )
-
-        params.append(
-            f"%{search_customer_name}%"
-        )
-
-
-    # =====================================================
-    # 物流單號：部分搜尋
-    # =====================================================
-
-    search_tracking_number = (
-        search_tracking_number or ""
-    ).strip()
+        conditions.append("customer_name LIKE %s")
+        params.append(f"%{search_customer_name}%")
 
     if search_tracking_number:
+        conditions.append("tracking_number LIKE %s")
+        params.append(f"%{search_tracking_number}%")
 
-        conditions.append(
-            "tracking_number LIKE %s"
-        )
-
-        params.append(
-            f"%{search_tracking_number}%"
-        )
-
-
-    # =====================================================
-    # 人民幣金額：精準搜尋
-    # =====================================================
-
-    search_amount_rmb = str(
-        search_amount_rmb or ""
-    ).strip()
-
-    if search_amount_rmb:
-
+    if search_amount_rmb and not search_error:
         try:
-
-            amount_value = Decimal(
-                search_amount_rmb
-            )
-
+            amount_value = Decimal(search_amount_rmb)
         except InvalidOperation:
-
-            return {
-                "orders": [],
-                "total_count": 0,
-                "total_weight": 0
-            }
-
-
-        conditions.append(
-            "amount_rmb = %s"
-        )
-
-        params.append(
-            amount_value
-        )
-
-
-    # =====================================================
-    # 平台：部分搜尋
-    # =====================================================
-
-    search_platform = (
-        search_platform or ""
-    ).strip()
+            search_error = "人民幣金額只能輸入數字。"
+        else:
+            conditions.append("amount_rmb = %s")
+            params.append(amount_value)
 
     if search_platform:
-
-        conditions.append(
-            "platform LIKE %s"
-        )
-
-        params.append(
-            f"%{search_platform}%"
-        )
-
-
-    # =====================================================
-    # 下單日期
-    # =====================================================
-
-    search_order_date = (
-        search_order_date or ""
-    ).strip()
+        conditions.append("platform LIKE %s")
+        params.append(f"%{search_platform}%")
 
     if search_order_date:
+        try:
+            datetime.strptime(search_order_date, "%Y-%m-%d")
+        except ValueError:
+            search_error = "下單日期格式錯誤。"
+        else:
+            conditions.append("DATE(order_time) = %s")
+            params.append(search_order_date)
 
-        conditions.append(
-            "order_time = %s"
-        )
+    if search_arrived_status == "arrived":
+        conditions.append("COALESCE(is_arrived, 0) = 1")
+    elif search_arrived_status == "unarrived":
+        conditions.append("COALESCE(is_arrived, 0) = 0")
 
-        params.append(
-            search_order_date
-        )
+    # 新版三態篩選；同時保留舊 unreturned=1 相容
+    if search_returned_status == "returned":
+        conditions.append("COALESCE(is_returned, 0) = 1")
+    elif search_returned_status == "unreturned":
+        conditions.append("COALESCE(is_returned, 0) = 0")
+    elif not search_returned_status:
+        if unreturned == "1":
+            conditions.append("COALESCE(is_returned, 0) = 0")
+            conditions.append("COALESCE(order_status, '正常') <> '取消'")
+        elif unreturned == "0":
+            conditions.append("COALESCE(is_returned, 0) = 1")
 
-
-    # =====================================================
-    # 只看未運回
-    # =====================================================
-
-    if unreturned == "1":
-
-        conditions.append(
-            "COALESCE(is_returned, 0) = 0"
-        )
-
-        conditions.append(
-            "COALESCE(order_status, '正常') <> '取消'"
-        )
-
-
-    # =====================================================
-    # 沒有搜尋條件
-    # =====================================================
-
-    if not conditions:
-
+    if search_error:
         return {
             "orders": [],
             "total_count": 0,
-            "total_weight": 0
+            "total_weight": 0.0,
+            "showing_count": 0,
+            "is_default_view": False,
+            "search_error": search_error,
         }
 
-
-    where_sql = " AND ".join(
-        conditions
-    )
-
+    filtered = bool(conditions)
+    where_sql = " AND ".join(conditions) if conditions else "1=1"
+    limit_value = 300 if filtered else 100
 
     conn = get_db()
-
-
     try:
-
         with conn.cursor() as cursor:
-
-
-            # =================================================
-            # Stats
-            # =================================================
-
             cursor.execute(
                 f"""
                 SELECT
                     COUNT(*) AS total_count,
-
-                    COALESCE(
-                        SUM(weight_kg),
-                        0
-                    ) AS total_weight
-
+                    COALESCE(SUM(COALESCE(weight_kg, 0)), 0) AS total_weight
                 FROM orders
-
                 WHERE {where_sql}
                 """,
-                params
+                params,
             )
-
-
-            stats = cursor.fetchone()
-
-
-            total_count = (
-                stats["total_count"]
-                if stats
-                else 0
-            ) or 0
-
-
-            total_weight = float(
-                (
-                    stats["total_weight"]
-                    if stats
-                    else 0
-                )
-                or 0
-            )
-
-
-            # =================================================
-            # Orders
-            # =================================================
+            stats = cursor.fetchone() or {}
 
             cursor.execute(
                 f"""
@@ -566,33 +430,26 @@ def query_orders(
                     weight_kg,
                     is_arrived,
                     is_returned,
+                    is_early_returned,
                     order_status
-
                 FROM orders
-
                 WHERE {where_sql}
-
-                ORDER BY
-                    order_id DESC
-
-                LIMIT 300
+                ORDER BY order_id DESC
+                LIMIT {limit_value}
                 """,
-                params
+                params,
             )
-
-
             orders = cursor.fetchall()
-
 
         return {
             "orders": orders,
-            "total_count": total_count,
-            "total_weight": total_weight
+            "total_count": int(stats.get("total_count") or 0),
+            "total_weight": float(stats.get("total_weight") or 0),
+            "showing_count": len(orders),
+            "is_default_view": not filtered,
+            "search_error": "",
         }
-
-
     finally:
-
         conn.close()
 
 
@@ -850,7 +707,7 @@ def display_audit_value(
 # =========================================================
 
 def dashboard_stats():
-    """首頁即時統計；所有數字都直接讀正式 orders 資料。"""
+    """首頁即時統計；訂單數字直接讀正式 orders，會員數字直接讀 members。"""
     taipei_now = datetime.now(ZoneInfo("Asia/Taipei"))
     month_start = taipei_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     if month_start.month == 12:
@@ -873,6 +730,17 @@ def dashboard_stats():
         )
     """
 
+    stats = {
+        "total_orders": 0,
+        "ready_orders": 0,
+        "ready_weight": 0.0,
+        "month_purchase_orders": 0,
+        "total_members": 0,
+        "line_bound": 0,
+        "binding_rate": 0.0,
+        "month_label": f"{taipei_now.month} 月",
+    }
+
     conn = get_db()
     try:
         with conn.cursor() as cursor:
@@ -883,11 +751,13 @@ def dashboard_stats():
                 WHERE COALESCE(order_status, '正常') <> '取消'
                 """
             )
-            total_orders = int((cursor.fetchone() or {}).get("cnt") or 0)
+            stats["total_orders"] = int((cursor.fetchone() or {}).get("cnt") or 0)
 
             cursor.execute(
                 f"""
-                SELECT COUNT(*) AS cnt
+                SELECT
+                    COUNT(*) AS cnt,
+                    COALESCE(SUM(COALESCE(o.weight_kg, 0)), 0) AS total_weight
                 FROM orders o
                 WHERE COALESCE(o.is_returned, 0) = 0
                   AND COALESCE(o.order_status, '正常') <> '取消'
@@ -896,7 +766,9 @@ def dashboard_stats():
                   AND ({ready_filter})
                 """
             )
-            ready_orders = int((cursor.fetchone() or {}).get("cnt") or 0)
+            ready_row = cursor.fetchone() or {}
+            stats["ready_orders"] = int(ready_row.get("cnt") or 0)
+            stats["ready_weight"] = float(ready_row.get("total_weight") or 0)
 
             cursor.execute(
                 """
@@ -909,14 +781,33 @@ def dashboard_stats():
                 """,
                 (month_start.date(), next_month.date()),
             )
-            month_purchase_orders = int((cursor.fetchone() or {}).get("cnt") or 0)
+            stats["month_purchase_orders"] = int((cursor.fetchone() or {}).get("cnt") or 0)
 
-        return {
-            "total_orders": total_orders,
-            "ready_orders": ready_orders,
-            "month_purchase_orders": month_purchase_orders,
-            "month_label": f"{taipei_now.month} 月",
-        }
+            cursor.execute("SHOW TABLES LIKE 'members'")
+            if cursor.fetchone():
+                cursor.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS total_members,
+                        SUM(
+                            CASE
+                                WHEN line_user_id IS NOT NULL
+                                 AND TRIM(line_user_id) <> ''
+                                THEN 1 ELSE 0
+                            END
+                        ) AS line_bound
+                    FROM members
+                    """
+                )
+                member_row = cursor.fetchone() or {}
+                stats["total_members"] = int(member_row.get("total_members") or 0)
+                stats["line_bound"] = int(member_row.get("line_bound") or 0)
+                if stats["total_members"] > 0:
+                    stats["binding_rate"] = (
+                        stats["line_bound"] / stats["total_members"] * 100.0
+                    )
+
+        return stats
     finally:
         conn.close()
 
@@ -944,18 +835,27 @@ async def home(
 
 @app.get("/orders")
 async def orders_page(
-
     request: Request,
-
-    admin: str = Depends(
-        verify_admin
-    )
+    admin: str = Depends(verify_admin)
 ):
+    result = query_orders()
 
     return templates.TemplateResponse(
         request=request,
         name="orders.html",
-        context={}
+        context={
+            **result,
+            "platforms": fetch_platforms(),
+            "search_order_id": "",
+            "search_customer_name": "",
+            "search_tracking_number": "",
+            "search_amount_rmb": "",
+            "search_platform": "",
+            "search_order_date": "",
+            "search_arrived_status": "",
+            "search_returned_status": "",
+            "unreturned": "",
+        },
     )
 
 
@@ -965,80 +865,45 @@ async def orders_page(
 
 @app.get("/orders/search")
 async def search_orders(
-
     request: Request,
-
     search_order_id: str = "",
-
     search_customer_name: str = "",
-
     search_tracking_number: str = "",
-
     search_amount_rmb: str = "",
-
     search_platform: str = "",
-
     search_order_date: str = "",
-
+    search_arrived_status: str = "",
+    search_returned_status: str = "",
     unreturned: str = "",
-
-    admin: str = Depends(
-        verify_admin
-    )
+    admin: str = Depends(verify_admin),
 ):
-
     result = query_orders(
-
-        search_order_id=
-            search_order_id,
-
-        search_customer_name=
-            search_customer_name,
-
-        search_tracking_number=
-            search_tracking_number,
-
-        search_amount_rmb=
-            search_amount_rmb,
-
-        search_platform=
-            search_platform,
-
-        search_order_date=
-            search_order_date,
-
-        unreturned=
-            unreturned
+        search_order_id=search_order_id,
+        search_customer_name=search_customer_name,
+        search_tracking_number=search_tracking_number,
+        search_amount_rmb=search_amount_rmb,
+        search_platform=search_platform,
+        search_order_date=search_order_date,
+        search_arrived_status=search_arrived_status,
+        search_returned_status=search_returned_status,
+        unreturned=unreturned,
     )
-
 
     return templates.TemplateResponse(
         request=request,
         name="order_results.html",
         context={
             **result,
-
-            "search_order_id":
-                search_order_id,
-
-            "search_customer_name":
-                search_customer_name,
-
-            "search_tracking_number":
-                search_tracking_number,
-
-            "search_amount_rmb":
-                search_amount_rmb,
-
-            "search_platform":
-                search_platform,
-
-            "search_order_date":
-                search_order_date,
-
-            "unreturned":
-                unreturned
-        }
+            "search_order_id": search_order_id,
+            "search_customer_name": search_customer_name,
+            "search_tracking_number": search_tracking_number,
+            "search_amount_rmb": search_amount_rmb,
+            "search_platform": search_platform,
+            "search_order_date": search_order_date,
+            "search_arrived_status": search_arrived_status,
+            "search_returned_status": search_returned_status,
+            "unreturned": unreturned,
+        },
     )
 
 
@@ -1066,6 +931,10 @@ async def order_detail(
     search_platform: str = "",
 
     search_order_date: str = "",
+
+    search_arrived_status: str = "",
+
+    search_returned_status: str = "",
 
     unreturned: str = "",
 
@@ -1111,6 +980,12 @@ async def order_detail(
             "search_order_date":
                 search_order_date,
 
+            "search_arrived_status":
+                search_arrived_status,
+
+            "search_returned_status":
+                search_returned_status,
+
             "unreturned":
                 unreturned
         }
@@ -1141,6 +1016,10 @@ async def edit_order_page(
     search_platform: str = "",
 
     search_order_date: str = "",
+
+    search_arrived_status: str = "",
+
+    search_returned_status: str = "",
 
     unreturned: str = "",
 
@@ -1201,6 +1080,12 @@ async def edit_order_page(
 
             "search_order_date":
                 search_order_date,
+
+            "search_arrived_status":
+                search_arrived_status,
+
+            "search_returned_status":
+                search_returned_status,
 
             "unreturned":
                 unreturned
@@ -1267,6 +1152,14 @@ async def update_order(
         ""
     ),
 
+    search_arrived_status: str = Form(
+        ""
+    ),
+
+    search_returned_status: str = Form(
+        ""
+    ),
+
     unreturned: str = Form(
         ""
     ),
@@ -1275,6 +1168,8 @@ async def update_order(
         verify_admin
     )
 ):
+
+    _check_same_origin(request)
 
     # =====================================================
     # Old Order
@@ -1561,6 +1456,12 @@ async def update_order(
         search_order_date=
             search_order_date,
 
+        search_arrived_status=
+            search_arrived_status,
+
+        search_returned_status=
+            search_returned_status,
+
         unreturned=
             unreturned
     )
@@ -1589,6 +1490,12 @@ async def update_order(
 
             "search_order_date":
                 search_order_date,
+
+            "search_arrived_status":
+                search_arrived_status,
+
+            "search_returned_status":
+                search_returned_status,
 
             "unreturned":
                 unreturned
@@ -1633,6 +1540,14 @@ async def delete_order(
         ""
     ),
 
+    search_arrived_status: str = Form(
+        ""
+    ),
+
+    search_returned_status: str = Form(
+        ""
+    ),
+
     unreturned: str = Form(
         ""
     ),
@@ -1641,6 +1556,8 @@ async def delete_order(
         verify_admin
     )
 ):
+
+    _check_same_origin(request)
 
 
 
@@ -1740,6 +1657,12 @@ async def delete_order(
         search_order_date=
             search_order_date,
 
+        search_arrived_status=
+            search_arrived_status,
+
+        search_returned_status=
+            search_returned_status,
+
         unreturned=
             unreturned
     )
@@ -1768,6 +1691,12 @@ async def delete_order(
 
             "search_order_date":
                 search_order_date,
+
+            "search_arrived_status":
+                search_arrived_status,
+
+            "search_returned_status":
+                search_returned_status,
 
             "unreturned":
                 unreturned
