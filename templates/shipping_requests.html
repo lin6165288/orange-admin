@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}前台運回申請｜橘貓代購{% endblock %}
+{% block content %}
+<div class="page-header ship-page-title">
+  <div>
+    <h1>🚚 出貨管理</h1>
+    <p>查看客戶從前台送出的運回申請，確認包裹後再標記申請狀態。</p>
+  </div>
+  <div class="ship-page-tabs">
+    <a class="ship-page-tab" href="/shipping">📦 可出貨名單</a>
+    <a class="ship-page-tab active" href="/shipping/requests">📨 前台運回申請</a>
+  </div>
+</div>
+
+{% if message %}<div class="ship-msg ship-success" role="status">{{ message }}</div>{% endif %}
+{% if error %}<div class="ship-msg ship-error" role="alert">{{ error }}</div>{% endif %}
+
+<section class="ship-card">
+  <form method="get" action="/shipping/requests" class="return-request-filter">
+    <div class="return-filter-field">
+      <label for="request-status">申請狀態</label>
+      <select id="request-status" name="status">
+        <option value="pending" {% if status == 'pending' %}selected{% endif %}>待處理</option>
+        <option value="processed" {% if status == 'processed' %}selected{% endif %}>已處理</option>
+        <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>已取消</option>
+        <option value="all" {% if status == 'all' %}selected{% endif %}>全部</option>
+      </select>
+    </div>
+    <div class="return-filter-field return-filter-name">
+      <label for="request-customer">客戶姓名</label>
+      <input id="request-customer" name="customer" value="{{ customer }}" placeholder="輸入客戶姓名" autocomplete="off">
+    </div>
+    <div class="return-filter-actions">
+      <a class="clear-filter-button" href="/shipping/requests">清除條件</a>
+      <button type="submit" class="ship-primary">🔍 查詢</button>
+    </div>
+  </form>
+</section>
+
+<section class="ship-metrics return-request-metrics">
+  <div class="ship-metric"><span>目前顯示申請</span><strong>{{ requests|length }} <small>筆</small></strong></div>
+  <div class="ship-metric"><span>總包裹件數</span><strong>{{ total_count }} <small>件</small></strong></div>
+  <div class="ship-metric"><span>總重量</span><strong>{{ '%.2f'|format(total_weight) }} <small>kg</small></strong></div>
+  <div class="ship-metric ship-fee-metric"><span>前台預估運費合計</span><strong>NT$ {{ '%.0f'|format(total_fee) }}</strong></div>
+</section>
+
+<section class="ship-card">
+  <div class="ship-header return-request-heading">
+    <div>
+      <h2>📨 前台運回申請</h2>
+      <p class="ship-muted">「已處理 / 已取消」只會修改申請狀態，不會自動把訂單改成已運回。實際出貨完成後仍可回到「可出貨名單」批次標記。</p>
+    </div>
+  </div>
+
+  {% if requests %}
+  <form method="post" action="/shipping/requests/apply" onsubmit="return confirmReturnRequestAction(this)">
+    <input type="hidden" name="status_filter" value="{{ status }}">
+    <input type="hidden" name="customer_filter" value="{{ customer }}">
+    <div class="return-request-toolbar">
+      {% if status == 'pending' or status == 'all' %}
+      <label class="ship-select-all"><input type="checkbox" onchange="togglePendingRequests(this)"> 全選本頁待處理申請</label>
+      <div class="return-request-actions">
+        <button type="submit" name="action" value="processed" class="ship-primary">✅ 標記已處理</button>
+        <button type="submit" name="action" value="cancelled" class="return-cancel-btn">🗑 標記取消</button>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="ship-table-wrap">
+      <table class="ship-table return-request-table">
+        <thead>
+          <tr>
+            <th>選取</th><th>申請</th><th>客戶</th><th>船班</th><th>台灣端寄送</th><th>件數</th><th>總重量</th><th>預估運費</th><th>申請時間</th><th>狀態</th><th>明細</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for req in requests %}
+          <tr>
+            <td>
+              {% if req.status == 'pending' %}
+              <input class="pending-request-checkbox" type="checkbox" name="selected_request_ids" value="{{ req.request_id }}" aria-label="選取申請 {{ req.request_id }}">
+              {% else %}—{% endif %}
+            </td>
+            <td>#{{ req.request_id }}</td>
+            <td class="ship-customer">{{ req.customer_name }}</td>
+            <td>{{ req.selected_shipping_batch or '—' }}</td>
+            <td>{{ req.delivery_method or '—' }}</td>
+            <td>{{ req.total_count }}</td>
+            <td>{{ '%.2f'|format(req.total_weight_num) }} kg</td>
+            <td>NT$ {{ '%.0f'|format(req.estimated_fee_num) }}</td>
+            <td class="return-created-at">{{ req.created_at }}</td>
+            <td><span class="return-status {{ req.status }}">{{ req.status_label }}</span></td>
+            <td><button type="button" class="return-detail-btn" hx-get="/shipping/requests/{{ req.request_id }}/detail" hx-target="#return-detail-{{ req.request_id }}" hx-swap="innerHTML">查看</button></td>
+          </tr>
+          <tr class="return-detail-row"><td colspan="11"><div id="return-detail-{{ req.request_id }}" class="return-detail-container"></div></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+  {% else %}
+  <div class="ship-empty">目前沒有符合條件的運回申請。</div>
+  {% endif %}
+</section>
+
+<script>
+function togglePendingRequests(master) {
+  document.querySelectorAll('.pending-request-checkbox').forEach(x => x.checked = master.checked);
+}
+function confirmReturnRequestAction(form) {
+  const selected = [...form.querySelectorAll('input[name="selected_request_ids"]:checked')];
+  if (!selected.length) {
+    alert('請先勾選至少一筆待處理申請。');
+    return false;
+  }
+  const submitter = document.activeElement;
+  const action = submitter && submitter.value === 'cancelled' ? '取消' : '已處理';
+  return window.confirm(`確定要將 ${selected.length} 筆申請標記為「${action}」嗎？`);
+}
+</script>
+{% endblock %}

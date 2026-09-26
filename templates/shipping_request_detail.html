@@ -1,0 +1,36 @@
+<div class="return-detail-card">
+  <div class="return-detail-head">
+    <div><strong>申請 #{{ request_row.request_id }}</strong><span>{{ request_row.customer_name }}</span></div>
+    <button type="button" class="detail-close" onclick="document.getElementById('return-detail-{{ request_row.request_id }}').innerHTML=''">收起 ×</button>
+  </div>
+  <div class="return-detail-summary">
+    <div><span>船班</span><strong>{{ request_row.selected_shipping_batch or '—' }}</strong></div>
+    <div><span>台灣端寄送</span><strong>{{ request_row.delivery_method or '—' }}</strong></div>
+    <div><span>申請件數</span><strong>{{ request_row.total_count }} 件</strong></div>
+    <div><span>申請總重量</span><strong>{{ '%.2f'|format(request_row.total_weight_num) }} kg</strong></div>
+    <div><span>前台預估運費</span><strong>NT$ {{ '%.0f'|format(request_row.estimated_fee_num) }}</strong></div>
+    <div><span>申請時間</span><strong>{{ request_row.created_at }}</strong></div>
+  </div>
+
+  {% if items %}
+  <div class="ship-table-wrap return-items-wrap">
+    <table class="ship-table return-items-table">
+      <thead><tr><th>訂單</th><th>日期</th><th>平台</th><th>物流單號</th><th>重量</th><th>到貨</th><th>已運回</th><th>備註</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+      <tr>
+        <td>#{{ item.order_id }}</td>
+        <td>{{ item.order_time or '—' }}</td>
+        <td>{{ item.platform or '—' }}</td>
+        <td class="ship-tracking">{{ item.tracking_number or '—' }}</td>
+        <td>{{ '%.2f'|format(item.weight_num) }} kg</td>
+        <td>{% if item.is_arrived %}<span class="ship-tag ready">已到貨</span>{% else %}<span class="ship-tag">未到貨</span>{% endif %}</td>
+        <td>{% if item.is_returned %}<span class="ship-tag notified">已運回</span>{% else %}<span class="ship-tag">未運回</span>{% endif %}</td>
+        <td>{{ item.remarks or '—' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<div class="ship-empty">這筆申請目前沒有訂單明細。</div>{% endif %}
+</div>
