@@ -1,14 +1,23 @@
-"""Self-contained Excel export of shipping groups and details.
+"""Excel exports for the shipping page.
 
-Uses only the Python standard library to emit Office Open XML.  All user-supplied
-strings are written as inlineStr (never treated as Excel formulas).
+Two user-facing formats are generated:
+1) A macro-enabled 賣貨便 single-spec import workbook based on the user's template.
+   The template is copied byte-for-byte except for the first worksheet's data cells,
+   so the original VBA project, formatting, validation button and workbook structure
+   are preserved.
+2) A compact shipping detail .xlsx containing only the fields used during packing.
+
+The module uses the Python standard library only so Railway needs no extra Excel
+package at runtime.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -18,6 +27,10 @@ PACKAGE = "http://schemas.openxmlformats.org/package/2006/relationships"
 CONTENT = "http://schemas.openxmlformats.org/package/2006/content-types"
 ET.register_namespace("", MAIN)
 ET.register_namespace("r", OFFICE)
+
+SELLER_TEMPLATE_NAME = "賣貨便_批次新增商品區.xlsm"
+SELLER_FIRST_ROW = 7
+SELLER_MAX_SPECS = 100
 
 
 def q(local: str) -> str:
@@ -32,141 +45,290 @@ def col_letters(number: int) -> str:
     return result
 
 
-def text(value):
+def _text(value):
     if value is None:
-        return "—"
+        return ""
     if isinstance(value, (date, datetime)):
         return value.isoformat()[:10]
     return str(value)
 
 
-def add_cell(row, index: int, number: int, value, style: int = 0):
-    ref = f"{col_letters(index)}{number}"
-    if isinstance(value, tuple) and len(value) == 3 and value[0] == "formula":
-        cell = ET.SubElement(row, q("c"), r=ref, s=str(style))
-        ET.SubElement(cell, q("f")).text = value[1][1:] if value[1].startswith("=") else value[1]
-        ET.SubElement(cell, q("v")).text = str(value[2])
-    elif isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+def _as_date(value) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value), "%Y-%m-%d").date()
+
+
+def _clear_cell(cell):
+    for child in list(cell):
+        cell.remove(child)
+    for attr in ("t",):
+        cell.attrib.pop(attr, None)
+
+
+def _set_inline(cell, value):
+    _clear_cell(cell)
+    cell.set("t", "inlineStr")
+    inline = ET.SubElement(cell, q("is"))
+    text = ET.SubElement(inline, q("t"))
+    text.text = str(value)
+
+
+def _set_number(cell, value):
+    _clear_cell(cell)
+    ET.SubElement(cell, q("v")).text = str(value)
+
+
+def _find_or_create_row(sheet_data, row_number: int):
+    for row in sheet_data.findall(q("row")):
+        if int(row.get("r", "0")) == row_number:
+            return row
+    row = ET.Element(q("row"), r=str(row_number), ht="15")
+    rows = list(sheet_data.findall(q("row")))
+    inserted = False
+    for index, existing in enumerate(rows):
+        if int(existing.get("r", "0")) > row_number:
+            sheet_data.insert(index, row)
+            inserted = True
+            break
+    if not inserted:
+        sheet_data.append(row)
+    return row
+
+
+def _find_or_create_cell(row, ref: str, style: int | None = None):
+    for cell in row.findall(q("c")):
+        if cell.get("r") == ref:
+            if style is not None and "s" not in cell.attrib:
+                cell.set("s", str(style))
+            return cell
+    cell = ET.Element(q("c"), r=ref)
+    if style is not None:
+        cell.set("s", str(style))
+    # Keep cells in column order.
+    def col_num(r):
+        letters = "".join(ch for ch in r if ch.isalpha())
+        n = 0
+        for ch in letters:
+            n = n * 26 + ord(ch.upper()) - 64
+        return n
+    inserted = False
+    for index, existing in enumerate(list(row.findall(q("c")))):
+        if col_num(existing.get("r", "")) > col_num(ref):
+            row.insert(index, cell)
+            inserted = True
+            break
+    if not inserted:
+        row.append(cell)
+    return cell
+
+
+def _seller_template_path(template_path=None) -> Path:
+    if template_path:
+        return Path(template_path)
+    return Path(__file__).resolve().parent / "excel_templates" / SELLER_TEMPLATE_NAME
+
+
+def make_sellnow_xlsm(groups, return_date, template_path=None) -> bytes:
+    """Populate the user's 賣貨便 single-spec macro workbook.
+
+    One selected customer becomes one specification row:
+      A7 only: M/D運回下單區
+      C7 only: 橘貓代購
+      H7 only: 新品
+      D7:D...: customer name
+      E7:E...: 1
+      F7:F...: calculated international shipping fee
+
+    All sample/spec data in rows 7:106 is cleared first. VBA and all non-target
+    workbook parts are kept intact.
+    """
+    groups = list(groups or [])
+    if not groups:
+        raise ValueError("沒有可匯出的客戶")
+    if len(groups) > SELLER_MAX_SPECS:
+        raise ValueError(f"賣貨便單次最多可匯出 {SELLER_MAX_SPECS} 位客戶")
+    ship_date = _as_date(return_date)
+    template = _seller_template_path(template_path)
+    if not template.exists():
+        raise FileNotFoundError(f"找不到賣貨便範本：{template}")
+
+    with ZipFile(template, "r") as source:
+        sheet_xml = source.read("xl/worksheets/sheet1.xml")
+        root = ET.fromstring(sheet_xml)
+        sheet_data = root.find(q("sheetData"))
+        if sheet_data is None:
+            raise ValueError("賣貨便範本格式不正確：缺少 sheetData")
+
+        # Style ids copied from the supplied template. Keeping these styles makes
+        # newly created rows look identical to the original spec rows.
+        style_by_col = {
+            "A": 7, "B": 7, "C": 7, "D": 47, "E": 7, "F": 48,
+            "G": 7, "H": 21, "I": 7, "J": 7, "K": 21, "L": 21,
+        }
+        last_row = SELLER_FIRST_ROW + SELLER_MAX_SPECS - 1
+        for row_no in range(SELLER_FIRST_ROW, last_row + 1):
+            row = _find_or_create_row(sheet_data, row_no)
+            for col in "ABCDEFGHIJKL":
+                cell = _find_or_create_cell(row, f"{col}{row_no}", style_by_col.get(col))
+                _clear_cell(cell)
+
+        # Product-level cells exist only on the first specification row.
+        row7 = _find_or_create_row(sheet_data, SELLER_FIRST_ROW)
+        _set_inline(_find_or_create_cell(row7, "A7", 7), f"{ship_date.month}/{ship_date.day}運回下單區")
+        _set_inline(_find_or_create_cell(row7, "C7", 38), "橘貓代購")
+        _set_inline(_find_or_create_cell(row7, "H7", 21), "新品")
+
+        for offset, group in enumerate(groups):
+            row_no = SELLER_FIRST_ROW + offset
+            row = _find_or_create_row(sheet_data, row_no)
+            _set_inline(_find_or_create_cell(row, f"D{row_no}", 47), group["name"])
+            _set_number(_find_or_create_cell(row, f"E{row_no}", 7), 1)
+            fee = Decimal(str(group.get("total_fee") or 0))
+            _set_number(_find_or_create_cell(row, f"F{row_no}", 48), int(fee) if fee == fee.to_integral() else fee)
+
+        # Make the used range cover all supported rows, while leaving the macro,
+        # drawings, validation rules and other sheets untouched.
+        dimension = root.find(q("dimension"))
+        if dimension is not None:
+            dimension.set("ref", f"A1:L{max(25, SELLER_FIRST_ROW + len(groups) - 1)}")
+        new_sheet = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+        output = BytesIO()
+        with ZipFile(output, "w", compression=ZIP_DEFLATED) as target:
+            for info in source.infolist():
+                data = new_sheet if info.filename == "xl/worksheets/sheet1.xml" else source.read(info.filename)
+                target.writestr(info, data)
+    return output.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Compact detail workbook (.xlsx)
+# ---------------------------------------------------------------------------
+
+def _add_cell(row, index: int, row_number: int, value, style: int = 0):
+    ref = f"{col_letters(index)}{row_number}"
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
         cell = ET.SubElement(row, q("c"), r=ref, s=str(style))
         ET.SubElement(cell, q("v")).text = str(value)
     else:
         cell = ET.SubElement(row, q("c"), r=ref, s=str(style), t="inlineStr")
         inline = ET.SubElement(cell, q("is"))
-        ET.SubElement(inline, q("t")).text = text(value)
+        ET.SubElement(inline, q("t")).text = _text(value)
     return cell
 
 
-def worksheet(headers, records, widths, *, summary=False, total=None):
+def _detail_records(orders, return_date):
+    ship_date = _as_date(return_date)
+    date_text = f"{ship_date:%Y/%m/%d}"
+
+    # One tracking number = one package. Duplicate tracking numbers for the same
+    # customer are emitted only once. A rare missing tracking number is kept as a
+    # unique package by order id so the package is not silently lost.
+    packages = []
+    seen = set()
+    for order in orders or []:
+        customer = str(order.get("customer_name") or "").strip()
+        tracking = str(order.get("tracking_number") or "").strip()
+        order_id = order.get("order_id")
+        key = (customer, tracking) if tracking else (customer, f"__order_{order_id}")
+        if key in seen:
+            continue
+        seen.add(key)
+        packages.append({
+            "customer": customer,
+            "tracking": tracking,
+            "order_id": order_id,
+        })
+
+    counts = Counter(p["customer"] for p in packages)
+    rows = []
+    for package in packages:
+        tracking = package["tracking"]
+        last4 = tracking[-4:] if tracking else ""
+        rows.append([
+            package["customer"],
+            "",  # 下單順序由使用者在 Excel 內自行填寫
+            date_text,
+            counts[package["customer"]],
+            last4,
+        ])
+    return rows
+
+
+def _detail_styles_xml():
+    root = ET.Element(q("styleSheet"))
+    fonts = ET.SubElement(root, q("fonts"), count="3")
+    for color, bold in (("FF262626", False), ("FFFFFFFF", True), ("FF9A6700", False)):
+        font = ET.SubElement(fonts, q("font"))
+        ET.SubElement(font, q("sz"), val="11")
+        ET.SubElement(font, q("name"), val="Microsoft JhengHei")
+        ET.SubElement(font, q("color"), rgb=color)
+        if bold:
+            ET.SubElement(font, q("b"))
+    fills = ET.SubElement(root, q("fills"), count="4")
+    ET.SubElement(ET.SubElement(fills, q("fill")), q("patternFill"), patternType="none")
+    ET.SubElement(ET.SubElement(fills, q("fill")), q("patternFill"), patternType="gray125")
+    orange = ET.SubElement(ET.SubElement(fills, q("fill")), q("patternFill"), patternType="solid")
+    ET.SubElement(orange, q("fgColor"), rgb="FFF29A38")
+    ET.SubElement(orange, q("bgColor"), indexed="64")
+    yellow = ET.SubElement(ET.SubElement(fills, q("fill")), q("patternFill"), patternType="solid")
+    ET.SubElement(yellow, q("fgColor"), rgb="FFFFF4CC")
+    ET.SubElement(yellow, q("bgColor"), indexed="64")
+    borders = ET.SubElement(root, q("borders"), count="2")
+    ET.SubElement(borders, q("border"))
+    border = ET.SubElement(borders, q("border"))
+    for side in ("left", "right", "top", "bottom"):
+        s = ET.SubElement(border, q(side), style="thin")
+        ET.SubElement(s, q("color"), rgb="FFE5E7EB")
+    ET.SubElement(root, q("cellStyleXfs"), count="1").append(
+        ET.Element(q("xf"), numFmtId="0", fontId="0", fillId="0", borderId="0")
+    )
+    xfs = ET.SubElement(root, q("cellXfs"), count="4")
+    configs = [
+        (0, 0, 0, 0, "left"),     # normal
+        (0, 1, 2, 1, "center"),   # header
+        (0, 0, 3, 1, "center"),   # manual order sequence
+        (0, 0, 0, 1, "center"),   # centered body
+    ]
+    for num, font, fill, border_id, align in configs:
+        xf = ET.SubElement(xfs, q("xf"), numFmtId=str(num), fontId=str(font), fillId=str(fill),
+                           borderId=str(border_id), xfId="0")
+        ET.SubElement(xf, q("alignment"), horizontal=align, vertical="center")
+    return ET.tostring(root, xml_declaration=True, encoding="utf-8")
+
+
+def _detail_sheet_xml(records):
     ws = ET.Element(q("worksheet"))
     views = ET.SubElement(ws, q("sheetViews"))
     view = ET.SubElement(views, q("sheetView"), workbookViewId="0")
     ET.SubElement(view, q("pane"), ySplit="1", topLeftCell="A2", activePane="bottomLeft", state="frozen")
     cols = ET.SubElement(ws, q("cols"))
-    for i, width in enumerate(widths, start=1):
+    for i, width in enumerate([22, 15, 16, 14, 18], start=1):
         ET.SubElement(cols, q("col"), min=str(i), max=str(i), width=str(width), customWidth="1")
     data = ET.SubElement(ws, q("sheetData"))
-    header = ET.SubElement(data, q("row"), r="1", ht="29", customHeight="1")
-    for i, value in enumerate(headers, 1):
-        add_cell(header, i, 1, value, 1)
-    numeric = set(range(2, 13)) if summary else {1, 7}
-    for row_i, values in enumerate(records, 2):
-        row = ET.SubElement(data, q("row"), r=str(row_i), ht="23", customHeight="1")
-        for i, value in enumerate(values, 1):
-            is_number = i in numeric
-            style = 3 if is_number and (i == 1 and not summary or i in (2,4,8) and summary) else 2 if is_number else 0
-            add_cell(row, i, row_i, value, style)
-    if total is not None:
-        i = len(records) + 2
-        row = ET.SubElement(data, q("row"), r=str(i), ht="26", customHeight="1")
-        for column, value in enumerate(total, 1):
-            add_cell(row, column, i, value, 4 if column == 1 else 5)
-    last_row = 1 + len(records)
-    ET.SubElement(ws, q("autoFilter"), ref=f"A1:{col_letters(len(headers))}{last_row}")
-    ET.SubElement(ws, q("pageMargins"), left="0.25", right="0.25", top="0.45", bottom="0.45", header="0.2", footer="0.2")
+    headers = ["客戶姓名", "下單順序", "運回日期", "包裹總數", "單號後四碼"]
+    header = ET.SubElement(data, q("row"), r="1", ht="28", customHeight="1")
+    for index, title in enumerate(headers, 1):
+        _add_cell(header, index, 1, title, 1)
+    for row_no, record in enumerate(records, 2):
+        row = ET.SubElement(data, q("row"), r=str(row_no), ht="23", customHeight="1")
+        for index, value in enumerate(record, 1):
+            style = 2 if index == 2 else 3
+            _add_cell(row, index, row_no, value, style)
+    end = max(1, len(records) + 1)
+    ET.SubElement(ws, q("autoFilter"), ref=f"A1:E{end}")
+    ET.SubElement(ws, q("pageMargins"), left="0.3", right="0.3", top="0.45", bottom="0.45", header="0.2", footer="0.2")
     return ET.tostring(ws, xml_declaration=True, encoding="utf-8")
 
 
-def style_xml():
-    root = ET.Element(q("styleSheet"))
-    formats = ET.SubElement(root, q("numFmts"), count="1")
-    ET.SubElement(formats, q("numFmt"), numFmtId="164", formatCode='#,##0.00')
-    fonts = ET.SubElement(root, q("fonts"), count="2")
-    for bold in (False, True):
-        font = ET.SubElement(fonts, q("font"))
-        ET.SubElement(font, q("sz"), val="11")
-        ET.SubElement(font, q("name"), val="Microsoft JhengHei")
-        if bold:
-            ET.SubElement(font, q("b"))
-            ET.SubElement(font, q("color"), rgb="FFFFFFFF")
-    fills = ET.SubElement(root, q("fills"), count="3")
-    ET.SubElement(ET.SubElement(fills, q("fill")), q("patternFill"), patternType="none")
-    ET.SubElement(ET.SubElement(fills, q("fill")), q("patternFill"), patternType="gray125")
-    colored = ET.SubElement(ET.SubElement(fills, q("fill")), q("patternFill"), patternType="solid")
-    ET.SubElement(colored, q("fgColor"), rgb="FFB96B14")
-    ET.SubElement(colored, q("bgColor"), indexed="64")
-    borders = ET.SubElement(root, q("borders"), count="1")
-    ET.SubElement(borders, q("border"))
-    ET.SubElement(root, q("cellStyleXfs"), count="1").append(ET.Element(q("xf"), numFmtId="0", fontId="0", fillId="0", borderId="0"))
-    xfs = ET.SubElement(root, q("cellXfs"), count="6")
-    configs = [
-        (0, 0, 0),   # normal
-        (0, 1, 2),   # orange header
-        (164, 0, 0), # decimals
-        (1, 0, 0),   # integer
-        (0, 0, 2),   # total label
-        (164, 0, 2), # total value
-    ]
-    for num, font, fill in configs:
-        xf = ET.SubElement(xfs, q("xf"), numFmtId=str(num), fontId=str(font), fillId=str(fill), borderId="0", xfId="0", applyNumberFormat="1" if num else "0")
-        ET.SubElement(xf, q("alignment"), vertical="center", wrapText="1")
-    return ET.tostring(root, xml_declaration=True, encoding="utf-8")
-
-
-def make_shipping_xlsx(groups, orders, *, kind="summary") -> bytes:
-    """Summary: one sheet; details: detail rows plus per-customer fee breakdown.
-
-    groups must already be calculated using the shipping fee rules and EXACTLY
-    the same order selection as orders. No fee is attributed to a single order.
-    """
-    summary_headers = ["客戶姓名", "未運回件數", "總實重(kg)", "純集運件數", "純集運實重(kg)",
-                       "純集運計費重(kg)", "純集運運費(NT$)", "代購件數", "代購實重(kg)",
-                       "代購計費重(kg)", "代購運費(NT$)", "國際運費合計(NT$)"]
-    sums = [Decimal("0")] * 11
-    summary_rows = []
-    for ix, g in enumerate(groups, 2):
-        fields = [
-            g["name"], g["count"], g["weight"], g["forwarding_count"],
-            g["forwarding_weight"], g["forwarding_billed_weight"],
-            ("formula", f"=F{ix}*90", g["forwarding_fee"]),
-            g["purchase_count"], g["purchase_weight"], g["purchase_billed_weight"],
-            ("formula", f"=J{ix}*70", g["purchase_fee"]),
-            ("formula", f"=G{ix}+K{ix}", g["total_fee"]),
-        ]
-        summary_rows.append(fields)
-        values = [g["count"], g["weight"], g["forwarding_count"], g["forwarding_weight"],
-                  g["forwarding_billed_weight"], g["forwarding_fee"], g["purchase_count"],
-                  g["purchase_weight"], g["purchase_billed_weight"], g["purchase_fee"], g["total_fee"]]
-        sums = [a + Decimal(str(b)) for a, b in zip(sums, values)]
-    end = 1 + len(groups)
-    total = ["合計"] + [("formula", f"=SUM({col_letters(i)}2:{col_letters(i)}{end})", sums[i-2])
-                       for i in range(2, 13)] if groups else ["合計"] + [Decimal("0")]*11
-    summary_xml = worksheet(summary_headers, summary_rows,
-                            [22,15,17,15,19,21,21,13,18,19,19,23], summary=True, total=total)
-    sheets = [("客戶運費統整", summary_xml)]
-    if kind == "details":
-        headers = ["訂單編號", "下單日期", "客戶姓名", "平台", "包裹類別", "物流單號",
-                   "實重(kg)", "已到貨", "提前運回", "已延後", "已通知", "備註"]
-        lines = []
-        for o in orders:
-            remarks = str(o.get("remarks") or "")
-            lines.append([o["order_id"], text(o.get("order_time")), o["customer_name"], o.get("platform") or "—",
-                          "純集運" if o.get("platform") == "集運" else "代購", o.get("tracking_number") or "—",
-                          Decimal(str(o.get("weight_kg") or 0)), "是" if o.get("is_arrived") else "否",
-                          "是" if o.get("is_early_returned") else "否",
-                          "是" if o.get("delayed") or "[延後]" in remarks else "否",
-                          "是" if o.get("notified") or "[已通知]" in remarks else "否", remarks or "—"])
-        detail = worksheet(headers, lines, [14,17,22,15,15,27,15,12,16,13,13,38])
-        sheets = [("訂單明細", detail), ("客戶運費統整", summary_xml)]
+def make_shipping_detail_xlsx(orders, return_date) -> bytes:
+    records = _detail_records(orders, return_date)
+    if not records:
+        raise ValueError("沒有可匯出的包裹")
+    sheet_xml = _detail_sheet_xml(records)
     out = BytesIO()
     with ZipFile(out, "w", compression=ZIP_DEFLATED) as z:
         content_types = ET.Element("{" + CONTENT + "}Types")
@@ -174,24 +336,26 @@ def make_shipping_xlsx(groups, orders, *, kind="summary") -> bytes:
         ET.SubElement(content_types, "{" + CONTENT + "}Default", Extension="xml", ContentType="application/xml")
         ET.SubElement(content_types, "{" + CONTENT + "}Override", PartName="/xl/workbook.xml", ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml")
         ET.SubElement(content_types, "{" + CONTENT + "}Override", PartName="/xl/styles.xml", ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml")
-        for i in range(1, len(sheets)+1):
-            ET.SubElement(content_types, "{" + CONTENT + "}Override", PartName=f"/xl/worksheets/sheet{i}.xml", ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml")
+        ET.SubElement(content_types, "{" + CONTENT + "}Override", PartName="/xl/worksheets/sheet1.xml", ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml")
         z.writestr("[Content_Types].xml", ET.tostring(content_types, encoding="utf-8", xml_declaration=True).replace(b"ns0:", b"").replace(b"xmlns:ns0=", b"xmlns="))
         rels = ET.Element("{" + PACKAGE + "}Relationships")
         ET.SubElement(rels, "{" + PACKAGE + "}Relationship", Id="rId1", Type=OFFICE + "/officeDocument", Target="xl/workbook.xml")
         z.writestr("_rels/.rels", ET.tostring(rels, encoding="utf-8", xml_declaration=True).replace(b"ns0:", b"").replace(b"xmlns:ns0=", b"xmlns="))
-        wb = ET.Element(q("workbook"))
-        sheets_el = ET.SubElement(wb, q("sheets"))
-        for i, (name, _xml) in enumerate(sheets, 1):
-            ET.SubElement(sheets_el, q("sheet"), {"name": name, "sheetId": str(i), "{" + OFFICE + "}id": f"rId{i}"})
-        ET.SubElement(wb, q("calcPr"), calcId="191029", fullCalcOnLoad="1")
-        z.writestr("xl/workbook.xml", ET.tostring(wb, encoding="utf-8", xml_declaration=True))
+        workbook = ET.Element(q("workbook"))
+        sheets = ET.SubElement(workbook, q("sheets"))
+        ET.SubElement(sheets, q("sheet"), {"name": "運回明細表", "sheetId": "1", "{" + OFFICE + "}id": "rId1"})
+        z.writestr("xl/workbook.xml", ET.tostring(workbook, encoding="utf-8", xml_declaration=True))
         wb_rels = ET.Element("{" + PACKAGE + "}Relationships")
-        for i in range(1, len(sheets)+1):
-            ET.SubElement(wb_rels, "{" + PACKAGE + "}Relationship", Id=f"rId{i}", Type=OFFICE + "/worksheet", Target=f"worksheets/sheet{i}.xml")
-        ET.SubElement(wb_rels, "{" + PACKAGE + "}Relationship", Id=f"rId{len(sheets)+1}", Type=OFFICE + "/styles", Target="styles.xml")
+        ET.SubElement(wb_rels, "{" + PACKAGE + "}Relationship", Id="rId1", Type=OFFICE + "/worksheet", Target="worksheets/sheet1.xml")
+        ET.SubElement(wb_rels, "{" + PACKAGE + "}Relationship", Id="rId2", Type=OFFICE + "/styles", Target="styles.xml")
         z.writestr("xl/_rels/workbook.xml.rels", ET.tostring(wb_rels, encoding="utf-8", xml_declaration=True).replace(b"ns0:", b"").replace(b"xmlns:ns0=", b"xmlns="))
-        z.writestr("xl/styles.xml", style_xml())
-        for i, (_name, xml) in enumerate(sheets, 1):
-            z.writestr(f"xl/worksheets/sheet{i}.xml", xml)
+        z.writestr("xl/styles.xml", _detail_styles_xml())
+        z.writestr("xl/worksheets/sheet1.xml", sheet_xml)
     return out.getvalue()
+
+
+# Backward-compatible name retained in case an older route still imports it.
+def make_shipping_xlsx(groups, orders, *, kind="summary") -> bytes:
+    if kind == "details":
+        return make_shipping_detail_xlsx(orders, date.today())
+    raise ValueError("新版統整表請使用 make_sellnow_xlsm() 並提供運回日期")
