@@ -7,27 +7,36 @@
     <p>橘貓代購管理系統</p>
   </div>
 </div>
+
 <div class="dashboard-grid">
-  <div class="dashboard-card">
+  <a class="dashboard-card dashboard-card-link" href="/orders">
     <div class="card-icon"><i class="bi bi-box-seam"></i></div>
-    <div>
-      <div class="card-label">訂單管理</div>
-      <div class="card-value">—</div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">訂單總數</div>
+      <div class="card-value">{{ total_orders }} <small>筆</small></div>
+      <div class="card-note">不含已取消訂單</div>
     </div>
-  </div>
-  <div class="dashboard-card">
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+
+  <a class="dashboard-card dashboard-card-link" href="/shipping">
     <div class="card-icon"><i class="bi bi-truck"></i></div>
-    <div>
-      <div class="card-label">待出貨</div>
-      <div class="card-value">—</div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">可出貨</div>
+      <div class="card-value">{{ ready_orders }} <small>筆</small></div>
+      <div class="card-note">依目前出貨判定條件</div>
     </div>
-  </div>
-  <div class="dashboard-card">
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+
+  <a class="dashboard-card dashboard-card-link" href="/orders">
     <div class="card-icon"><i class="bi bi-bar-chart"></i></div>
-    <div>
-      <div class="card-label">本月訂單</div>
-      <div class="card-value">—</div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">{{ month_label }}代購訂單</div>
+      <div class="card-value">{{ month_purchase_orders }} <small>筆</small></div>
+      <div class="card-note">本月統計，不含平台「集運」</div>
     </div>
-  </div>
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
 </div>
 {% endblock %}
