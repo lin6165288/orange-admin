@@ -1,0 +1,46 @@
+<div class="member-summary-grid">
+  <div class="summary-card"><span>目前顯示</span><strong>{{ members|length }}</strong><small> 位</small></div>
+  <div class="summary-card"><span>一般會員</span><strong>{{ level_counts.get('一般會員', 0) }}</strong><small> 位</small></div>
+  <div class="summary-card"><span>VIP1</span><strong>{{ level_counts.get('VIP1', 0) }}</strong><small> 位</small></div>
+  <div class="summary-card"><span>VIP2</span><strong>{{ level_counts.get('VIP2', 0) }}</strong><small> 位</small></div>
+  <div class="summary-card"><span>VIP3</span><strong>{{ level_counts.get('VIP3', 0) }}</strong><small> 位</small></div>
+</div>
+
+{% if members %}
+<div class="member-table-card">
+  <table class="member-table">
+    <thead>
+      <tr>
+        <th>會員編號</th>
+        <th>客戶姓名</th>
+        <th>會員等級</th>
+        <th>LINE 名稱</th>
+        <th>訂單數</th>
+        <th>未運回</th>
+        <th>累計重量</th>
+        <th>最近訂單</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for member in members %}
+      <tr class="member-row"
+          hx-get="/members/{{ member.member_id }}/detail"
+          hx-target="#member-detail-{{ member.member_id }}"
+          hx-swap="innerHTML">
+        <td>#{{ member.member_id }}</td>
+        <td class="member-name">{{ member.customer_name }}</td>
+        <td><span class="member-level level-{{ member.member_level|lower|replace('一般會員','normal') }}">{{ member.member_level }}</span></td>
+        <td>{{ member.line_name or '—' }}</td>
+        <td>{{ member.order_count }}</td>
+        <td>{{ member.unreturned_count }}</td>
+        <td>{{ '%.2f'|format(member.total_weight_num) }} kg</td>
+        <td>{{ member.last_order_date or '—' }}</td>
+      </tr>
+      <tr class="member-detail-row"><td colspan="8"><div id="member-detail-{{ member.member_id }}" class="member-detail-container"></div></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">找不到符合條件的會員。</div>
+{% endif %}

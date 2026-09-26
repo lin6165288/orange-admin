@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}會員管理｜橘貓代購{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1><span class="page-title-icon"><i class="bi bi-people"></i></span>會員管理</h1>
+    <p>搜尋會員、調整 VIP 等級與備註，並查看該會員的訂單紀錄。</p>
+  </div>
+</div>
+
+<div class="member-search-card">
+  <form id="member-search-form"
+        hx-get="/members/search"
+        hx-target="#member-results"
+        hx-swap="innerHTML"
+        hx-trigger="submit, change from:select">
+    <div class="member-search-grid">
+      <div class="search-field">
+        <label>會員姓名 / LINE 名稱</label>
+        <input type="text" name="keyword" value="{{ keyword }}" placeholder="輸入姓名搜尋" autocomplete="off">
+      </div>
+      <div class="search-field">
+        <label>會員等級</label>
+        <select name="level">
+          <option value="all" {% if level == 'all' %}selected{% endif %}>全部</option>
+          {% for item in member_levels %}
+            <option value="{{ item }}" {% if level == item %}selected{% endif %}>{{ item }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="member-search-actions">
+        <a href="/members" class="clear-filter-button">清除條件</a>
+        <button type="submit" class="search-button"><i class="bi bi-search"></i><span>查詢</span></button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div id="member-results">
+  {% include "members_results.html" %}
+</div>
+{% endblock %}

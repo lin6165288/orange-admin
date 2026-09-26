@@ -1,0 +1,63 @@
+<div class="member-detail-card">
+  {% if message %}<div class="member-success"><i class="bi bi-check2-circle"></i><span>{{ message }}</span></div>{% endif %}
+  <div class="detail-header">
+    <div>
+      <strong>{{ member.customer_name }}</strong>
+      <span class="detail-subtitle">會員 #{{ member.member_id }}</span>
+    </div>
+    <div class="detail-actions">
+      <button type="button" class="detail-edit-button"
+              hx-get="/members/{{ member.member_id }}/edit"
+              hx-target="#member-detail-{{ member.member_id }}"
+              hx-swap="innerHTML"><i class="bi bi-pencil"></i><span>編輯會員</span></button>
+      <button type="button" class="detail-close"
+              onclick="document.getElementById('member-detail-{{ member.member_id }}').innerHTML=''">收起 ×</button>
+    </div>
+  </div>
+
+  <div class="member-profile-grid">
+    <div class="detail-item"><span>會員等級</span><strong>{{ member.member_level or '一般會員' }}</strong></div>
+    <div class="detail-item"><span>LINE 名稱</span><strong>{{ member.line_name or '—' }}</strong></div>
+    <div class="detail-item"><span>LINE User ID</span><strong class="member-line-id">{{ member.line_user_id or '尚未綁定' }}</strong></div>
+    <div class="detail-item"><span>建立時間</span><strong>{{ member.created_at or '—' }}</strong></div>
+  </div>
+
+  <div class="member-stat-strip">
+    <div><span>訂單總數</span><strong>{{ stats.order_count }}</strong></div>
+    <div><span>未運回</span><strong>{{ stats.unreturned_count }}</strong></div>
+    <div><span>累計重量</span><strong>{{ '%.2f'|format(stats.total_weight_num) }} kg</strong></div>
+    <div><span>累計人民幣</span><strong>¥{{ '%.2f'|format(stats.total_rmb_num) }}</strong></div>
+  </div>
+
+  <div class="member-note-box">
+    <span>會員備註</span>
+    <p>{{ member.note or '目前沒有備註。' }}</p>
+  </div>
+
+  <div class="member-orders-title"><span class="section-title-icon"><i class="bi bi-clock-history"></i></span>最近訂單紀錄 <small>最多顯示 50 筆</small></div>
+  {% if orders %}
+  <div class="member-orders-wrap">
+    <table class="member-orders-table">
+      <thead><tr><th>訂單</th><th>日期</th><th>平台</th><th>物流單號</th><th>人民幣</th><th>重量</th><th>狀態</th></tr></thead>
+      <tbody>
+      {% for order in orders %}
+        <tr>
+          <td>#{{ order.order_id }}</td>
+          <td>{{ order.order_time or '—' }}</td>
+          <td>{{ order.platform or '—' }}</td>
+          <td>{{ order.tracking_number or '—' }}</td>
+          <td>{% if order.amount_rmb is not none %}¥{{ order.amount_rmb }}{% else %}—{% endif %}</td>
+          <td>{% if order.weight_kg is not none %}{{ order.weight_kg }} kg{% else %}—{% endif %}</td>
+          <td>
+            {% if order.order_status == '取消' %}<span class="status status-cancel">取消</span>
+            {% elif order.is_returned %}<span class="status status-returned">已運回</span>
+            {% elif order.is_arrived %}<span class="status status-arrived">已到貨</span>
+            {% else %}<span class="status status-normal">運送中</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<div class="member-orders-empty">此會員目前沒有訂單紀錄。</div>{% endif %}
+</div>

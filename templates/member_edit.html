@@ -1,0 +1,39 @@
+<div class="member-detail-card member-edit-card">
+  <div class="detail-header">
+    <div><strong>編輯會員</strong><span class="detail-subtitle">{{ member.customer_name }}</span></div>
+    <button type="button" class="detail-close"
+            hx-get="/members/{{ member.member_id }}/detail"
+            hx-target="#member-detail-{{ member.member_id }}"
+            hx-swap="innerHTML">取消 ×</button>
+  </div>
+
+  <form hx-post="/members/{{ member.member_id }}/edit"
+        hx-target="#member-detail-{{ member.member_id }}"
+        hx-swap="innerHTML">
+    <div class="member-edit-grid">
+      <div class="edit-field">
+        <label>客戶姓名</label>
+        <input type="text" value="{{ member.customer_name }}" disabled>
+        <small>會員姓名目前不在此頁直接修改，避免與既有訂單姓名失去對應。</small>
+      </div>
+      <div class="edit-field">
+        <label>會員等級</label>
+        <select name="member_level">
+          {% for level in member_levels %}<option value="{{ level }}" {% if member.member_level == level %}selected{% endif %}>{{ level }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="edit-field edit-remarks">
+      <label>會員備註</label>
+      <textarea name="note" rows="5" placeholder="輸入會員備註">{{ member.note or '' }}</textarea>
+    </div>
+    <div class="member-readonly-info">LINE 名稱：{{ member.line_name or '—' }}　｜　LINE 綁定：{% if member.line_user_id %}已綁定{% else %}尚未綁定{% endif %}</div>
+    <div class="edit-actions">
+      <button type="button" class="edit-cancel"
+              hx-get="/members/{{ member.member_id }}/detail"
+              hx-target="#member-detail-{{ member.member_id }}"
+              hx-swap="innerHTML">取消</button>
+      <button type="submit" class="edit-save">儲存會員資料</button>
+    </div>
+  </form>
+</div>
