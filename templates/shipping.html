@@ -1,6 +1,15 @@
 {% extends "base.html" %}
 {% block title %}出貨管理｜橘貓代購{% endblock %}
 {% block content %}
-<div class="page-header"><h1>🚚 出貨管理</h1><p>查詢可出貨包裹、批次標記已通知／延後／提前運回／已運回。</p></div>
+<div class="page-header ship-page-title">
+  <div>
+    <h1>🚚 出貨管理</h1>
+    <p>可出貨名單、批次操作、Excel 匯出與前台運回申請集中管理。</p>
+  </div>
+  <div class="ship-page-tabs">
+    <a class="ship-page-tab active" href="/shipping">📦 可出貨名單</a>
+    <a class="ship-page-tab" href="/shipping/requests">📨 前台運回申請</a>
+  </div>
+</div>
 <div id="shipping-body">{% include "shipping_body.html" %}</div>
 {% endblock %}
