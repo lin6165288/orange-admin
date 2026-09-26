@@ -4480,3 +4480,204 @@ def forwarding_registers_apply(
         msg += f" {skipped_count} 筆因狀態已變更而略過。"
     return _forwarding_redirect(status_filter, keyword_filter, message=msg)
 
+
+
+# =========================================================
+# 匿名回饋管理
+# 舊版管理頁欄位：id / created_at / content / status / staff_note
+# 舊 feedback_store.py 未包含在目前專案，因此新版後台改用 MySQL 持久化。
+# 若資料庫已有相容的 feedbacks 表，優先沿用；否則使用 anonymous_feedbacks。
+# =========================================================
+
+FEEDBACK_STATUSES = ("未處理", "已讀", "已回覆", "忽略")
+FEEDBACK_TABLE_CANDIDATES = ("anonymous_feedbacks", "feedbacks")
+
+
+def _feedback_table_has_required_columns(cursor, table_name: str) -> bool:
+    if table_name not in FEEDBACK_TABLE_CANDIDATES:
+        return False
+    cursor.execute(f"SHOW COLUMNS FROM `{table_name}`")
+    columns = {row["Field"] for row in cursor.fetchall()}
+    return {"id", "content", "status", "staff_note", "created_at"}.issubset(columns)
+
+
+def ensure_feedback_table_admin() -> str:
+    """回傳實際使用的回饋表名，優先沿用相容舊表。"""
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            for table_name in FEEDBACK_TABLE_CANDIDATES:
+                cursor.execute("SHOW TABLES LIKE %s", (table_name,))
+                if cursor.fetchone() and _feedback_table_has_required_columns(cursor, table_name):
+                    return table_name
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS anonymous_feedbacks (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT '未處理',
+                    staff_note TEXT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_feedback_status (status),
+                    INDEX idx_feedback_created_at (created_at)
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+        conn.commit()
+        return "anonymous_feedbacks"
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def feedback_rows(keyword="", status="all"):
+    table_name = ensure_feedback_table_admin()
+    keyword = str(keyword or "").strip()[:120]
+    status = str(status or "all")
+    if status not in ("all",) + FEEDBACK_STATUSES:
+        status = "all"
+
+    where = ["1=1"]
+    params = []
+    if status != "all":
+        where.append("status = %s")
+        params.append(status)
+    if keyword:
+        like = f"%{keyword}%"
+        where.append("(content LIKE %s OR COALESCE(staff_note,'') LIKE %s)")
+        params.extend([like, like])
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT id, created_at, content, status, staff_note
+                FROM `{table_name}`
+                WHERE {' AND '.join(where)}
+                ORDER BY created_at DESC, id DESC
+                LIMIT 500
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+            cursor.execute(
+                f"""
+                SELECT status, COUNT(*) AS cnt
+                FROM `{table_name}`
+                GROUP BY status
+                """
+            )
+            counts = {row["status"]: int(row["cnt"] or 0) for row in cursor.fetchall()}
+    finally:
+        conn.close()
+
+    for row in rows:
+        if row.get("status") not in FEEDBACK_STATUSES:
+            row["status"] = "未處理"
+    return rows, counts, keyword, status
+
+
+def _feedback_redirect(status_filter="all", keyword="", message="", error=""):
+    parts = [f"status={quote(str(status_filter or 'all'))}"]
+    if keyword:
+        parts.append("keyword=" + quote(str(keyword)))
+    if message:
+        parts.append("message=" + quote(str(message)))
+    if error:
+        parts.append("error=" + quote(str(error)))
+    return RedirectResponse(url="/feedbacks?" + "&".join(parts), status_code=303)
+
+
+@app.get("/feedbacks")
+def feedbacks_page(
+    request: Request,
+    keyword: str = "",
+    status: str = "all",
+    message: str = "",
+    error: str = "",
+    admin: str = Depends(verify_admin),
+):
+    rows, counts, keyword, status = feedback_rows(keyword, status)
+    return templates.TemplateResponse(
+        request=request,
+        name="feedbacks.html",
+        context={
+            "rows": rows,
+            "counts": counts,
+            "keyword": keyword,
+            "status": status,
+            "message": str(message or ""),
+            "error": str(error or ""),
+            "feedback_statuses": FEEDBACK_STATUSES,
+        },
+    )
+
+
+@app.post("/feedbacks/apply")
+def feedbacks_apply(
+    request: Request,
+    selected_feedback_ids: list[int] = Form([]),
+    new_status: str = Form(""),
+    staff_note: str = Form(""),
+    status_filter: str = Form("all"),
+    keyword_filter: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    table_name = ensure_feedback_table_admin()
+
+    ids = []
+    seen = set()
+    for raw in selected_feedback_ids:
+        try:
+            fid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if fid > 0 and fid not in seen:
+            seen.add(fid)
+            ids.append(fid)
+
+    if not ids:
+        return _feedback_redirect(status_filter, keyword_filter, error="請先勾選至少一筆匿名回饋。")
+    if len(ids) > 100:
+        return _feedback_redirect(status_filter, keyword_filter, error="一次最多處理 100 筆匿名回饋。")
+    if new_status not in ("已讀", "已回覆", "忽略"):
+        return _feedback_redirect(status_filter, keyword_filter, error="請選擇要套用的狀態。")
+
+    note_value = str(staff_note or "").strip()
+    if len(note_value) > 65535:
+        return _feedback_redirect(status_filter, keyword_filter, error="備註內容過長。")
+
+    placeholders = ",".join(["%s"] * len(ids))
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            # 舊版邏輯：有輸入備註就覆蓋 staff_note；未輸入則只改狀態。
+            if note_value:
+                cursor.execute(
+                    f"UPDATE `{table_name}` SET status=%s, staff_note=%s WHERE id IN ({placeholders})",
+                    [new_status, note_value] + ids,
+                )
+            else:
+                cursor.execute(
+                    f"UPDATE `{table_name}` SET status=%s WHERE id IN ({placeholders})",
+                    [new_status] + ids,
+                )
+            changed = int(cursor.rowcount or 0)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return _feedback_redirect(
+        status_filter,
+        keyword_filter,
+        message=f"已將 {changed} 筆回饋更新為「{new_status}」。",
+    )
