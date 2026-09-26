@@ -29,7 +29,7 @@ from fastapi.security import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse, Response
-from shipping_excel import make_shipping_xlsx
+from shipping_excel import make_sellnow_xlsm, make_shipping_detail_xlsx
 
 
 # =========================================================
@@ -2700,6 +2700,7 @@ def shipping_apply(request: Request, selected_order_ids: list[int] = Form([]),
 def shipping_export(
     request: Request,
     export_kind: str = Form(""),
+    return_date: str = Form(""),
     selected_customers: list[str] = Form([]),
     selected_order_ids: list[int] = Form([]),
     mode: str = Form("ready"),
@@ -2713,13 +2714,25 @@ def shipping_export(
         raise HTTPException(status_code=422, detail="匯出類型不正確")
     if mode not in ("ready", "customer"):
         raise HTTPException(status_code=422, detail="出貨模式不正確")
+
+    # 所有出貨 Excel 都必須由使用者先指定本次運回日期。
+    return_date = str(return_date or "").strip()
+    try:
+        ship_date = datetime.strptime(return_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="請先選擇正確的運回日期")
+
     if export_kind == "selected_orders":
         if not 1 <= len(selected_order_ids) <= 500 or len(set(selected_order_ids)) != len(selected_order_ids):
             raise HTTPException(status_code=422, detail="請先選取 1～500 筆不重複訂單")
     else:
-        if not 1 <= len(selected_customers) <= 500 or len(set(selected_customers)) != len(selected_customers):
+        max_customers = 100 if export_kind == "customer_summary" else 500
+        if not 1 <= len(selected_customers) <= max_customers or len(set(selected_customers)) != len(selected_customers):
+            if export_kind == "customer_summary":
+                raise HTTPException(status_code=422, detail="賣貨便統整表一次請選取 1～100 位不重複客戶")
             raise HTTPException(status_code=422, detail="請先選取 1～500 位不重複客戶")
-    # 與目前畫面同一查詢條件及前 500 筆範圍，防止偽造跨客戶匯出。
+
+    # 與目前畫面使用完全相同的查詢條件及前 500 筆範圍，避免偽造跨客戶匯出。
     rows, _has_more = shipping_rows(
         mode, customer, hide_delayed == "1", hide_notified == "1"
     )
@@ -2735,22 +2748,31 @@ def shipping_export(
             raise HTTPException(status_code=409, detail="名單已變動，請更新後重新勾選客戶")
         chosen = set(selected_customers)
         export_rows = [row for row in rows if row["customer_name"] in chosen]
-    # 本次勾選範圍重新分組合重，保持與原出貨運費算法完全一致。
+
+    # 統整表的價格仍依同一位客戶「純集運 / 代購」分池合重後計算。
     groups = shipping_fee_breakdown(export_rows)
-    wb_kind = "summary" if export_kind == "customer_summary" else "details"
-    payload = make_shipping_xlsx(groups, export_rows, kind=wb_kind)
-    label = {
-        "customer_summary": "客戶運費統整_勾選",
-        "customer_details": "客戶訂單明細_勾選",
-        "selected_orders": "單筆訂單明細_勾選",
-    }[export_kind]
-    filename = f"{label}_{datetime.now(ZoneInfo('Asia/Taipei')):%Y%m%d_%H%M}.xlsx"
+    date_code = ship_date.strftime("%Y%m%d")
+
+    try:
+        if export_kind == "customer_summary":
+            payload = make_sellnow_xlsm(groups, ship_date)
+            filename = f"{date_code}賣貨便批次匯入.xlsm"
+            media_type = "application/vnd.ms-excel.sheet.macroEnabled.12"
+        else:
+            payload = make_shipping_detail_xlsx(export_rows, ship_date)
+            # 使用者指定的固定檔名格式：(運回日期)明細表
+            filename = f"{date_code}明細表.xlsx"
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     return Response(
         content=payload,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=media_type,
         headers={
-            "Content-Disposition": f"attachment; filename=shipping.xlsx; filename*=UTF-8''{quote(filename)}",
+            "Content-Disposition": f"attachment; filename=shipping; filename*=UTF-8''{quote(filename)}",
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
         },
     )
+
