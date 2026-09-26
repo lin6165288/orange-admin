@@ -3865,3 +3865,327 @@ def profit_export(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
+
+
+# =========================================================
+# 前台設定 / 公告管理
+# =========================================================
+
+FRONTEND_DELIVERY_TYPES = {
+    "home_delivery": "宅配",
+    "shop_delivery": "賣貨便",
+}
+
+
+def ensure_frontend_config_tables_admin():
+    """建立 / 補齊前台設定與船班資料表。"""
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS site_settings (
+                    setting_key VARCHAR(100) PRIMARY KEY,
+                    setting_value TEXT NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS shipping_batches (
+                    batch_id INT AUTO_INCREMENT PRIMARY KEY,
+                    batch_text VARCHAR(255) NOT NULL,
+                    delivery_type VARCHAR(30) NOT NULL DEFAULT 'home_delivery',
+                    sort_order INT NOT NULL DEFAULT 0,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+
+            cursor.execute("SHOW COLUMNS FROM shipping_batches")
+            existing = {row["Field"] for row in cursor.fetchall()}
+            additions = {
+                "delivery_type": "VARCHAR(30) NOT NULL DEFAULT 'home_delivery'",
+                "sort_order": "INT NOT NULL DEFAULT 0",
+                "is_active": "TINYINT(1) NOT NULL DEFAULT 1",
+                "updated_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+                "created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            }
+            for name, ddl in additions.items():
+                if name not in existing:
+                    cursor.execute(f"ALTER TABLE shipping_batches ADD COLUMN {name} {ddl}")
+
+            cursor.execute(
+                """
+                INSERT IGNORE INTO site_settings (setting_key, setting_value)
+                VALUES ('current_exchange_rate', '4.78')
+                """
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def frontend_settings_context(message="", error=""):
+    ensure_frontend_config_tables_admin()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT setting_key, setting_value, updated_at
+                FROM site_settings
+                WHERE setting_key IN ('orders_last_update_time', 'current_exchange_rate')
+                """
+            )
+            setting_rows = cursor.fetchall()
+            settings = {row["setting_key"]: row for row in setting_rows}
+
+            cursor.execute(
+                """
+                SELECT batch_id, batch_text, delivery_type,
+                       sort_order, is_active, updated_at, created_at
+                FROM shipping_batches
+                ORDER BY delivery_type ASC,
+                         is_active DESC,
+                         sort_order ASC,
+                         batch_id DESC
+                """
+            )
+            batches = cursor.fetchall()
+    finally:
+        conn.close()
+
+    rate_value = settings.get("current_exchange_rate", {}).get("setting_value")
+    try:
+        current_rate = float(rate_value) if rate_value is not None else 4.78
+    except (TypeError, ValueError):
+        current_rate = 4.78
+
+    for row in batches:
+        row["delivery_label"] = FRONTEND_DELIVERY_TYPES.get(
+            row.get("delivery_type"), "宅配"
+        )
+        row["is_active_bool"] = bool(row.get("is_active"))
+
+    return {
+        "orders_last_update_time": settings.get("orders_last_update_time", {}).get("setting_value") or "尚未設定",
+        "orders_last_update_updated_at": settings.get("orders_last_update_time", {}).get("updated_at"),
+        "current_rate": current_rate,
+        "rate_updated_at": settings.get("current_exchange_rate", {}).get("updated_at"),
+        "batches": batches,
+        "delivery_types": FRONTEND_DELIVERY_TYPES,
+        "message": str(message or ""),
+        "error": str(error or ""),
+    }
+
+
+def _frontend_redirect(message="", error=""):
+    parts = []
+    if message:
+        parts.append("message=" + quote(str(message)))
+    if error:
+        parts.append("error=" + quote(str(error)))
+    suffix = ("?" + "&".join(parts)) if parts else ""
+    return RedirectResponse(url="/frontend-settings" + suffix, status_code=303)
+
+
+@app.get("/frontend-settings")
+def frontend_settings_page(
+    request: Request,
+    message: str = "",
+    error: str = "",
+    admin: str = Depends(verify_admin),
+):
+    return templates.TemplateResponse(
+        request=request,
+        name="frontend_settings.html",
+        context=frontend_settings_context(message=message, error=error),
+    )
+
+
+@app.post("/frontend-settings/update-order-time")
+def frontend_update_order_time(
+    request: Request,
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+    now_str = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d %H:%M")
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO site_settings (setting_key, setting_value)
+                VALUES ('orders_last_update_time', %s)
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+                """,
+                (now_str,),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return _frontend_redirect(message=f"已更新前台訂單資料時間：{now_str}")
+
+
+@app.post("/frontend-settings/exchange-rate")
+def frontend_save_exchange_rate(
+    request: Request,
+    exchange_rate: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+    try:
+        rate = Decimal(str(exchange_rate).strip())
+    except (InvalidOperation, ValueError):
+        return _frontend_redirect(error="匯率格式不正確。")
+    if rate <= 0 or rate > Decimal("20"):
+        return _frontend_redirect(error="前台顯示匯率必須大於 0。")
+    rate_text = format(rate.quantize(Decimal("0.01")), "f")
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO site_settings (setting_key, setting_value)
+                VALUES ('current_exchange_rate', %s)
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+                """,
+                (rate_text,),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return _frontend_redirect(message=f"前台顯示匯率已更新為 {rate_text}。")
+
+
+@app.post("/frontend-settings/batches/add")
+def frontend_add_shipping_batch(
+    request: Request,
+    delivery_type: str = Form("home_delivery"),
+    batch_text: str = Form(""),
+    sort_order: int = Form(0),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+    delivery_type = str(delivery_type or "")
+    batch_text = str(batch_text or "").strip()
+    if delivery_type not in FRONTEND_DELIVERY_TYPES:
+        return _frontend_redirect(error="運回方式不正確。")
+    if not batch_text:
+        return _frontend_redirect(error="請輸入船班文字。")
+    if len(batch_text) > 255:
+        return _frontend_redirect(error="船班文字最多 255 個字。")
+    sort_order = max(0, min(int(sort_order or 0), 9999))
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO shipping_batches
+                    (batch_text, delivery_type, sort_order, is_active)
+                VALUES (%s, %s, %s, 1)
+                """,
+                (batch_text, delivery_type, sort_order),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return _frontend_redirect(message="已新增船班。")
+
+
+@app.post("/frontend-settings/batches/{batch_id}/save")
+def frontend_save_shipping_batch(
+    request: Request,
+    batch_id: int,
+    delivery_type: str = Form("home_delivery"),
+    batch_text: str = Form(""),
+    sort_order: int = Form(0),
+    is_active: Optional[str] = Form(None),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+    delivery_type = str(delivery_type or "")
+    batch_text = str(batch_text or "").strip()
+    if delivery_type not in FRONTEND_DELIVERY_TYPES:
+        return _frontend_redirect(error="運回方式不正確。")
+    if not batch_text:
+        return _frontend_redirect(error="船班文字不可空白。")
+    if len(batch_text) > 255:
+        return _frontend_redirect(error="船班文字最多 255 個字。")
+    sort_order = max(0, min(int(sort_order or 0), 9999))
+    active_value = 1 if is_active == "1" else 0
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE shipping_batches
+                SET batch_text = %s,
+                    delivery_type = %s,
+                    sort_order = %s,
+                    is_active = %s
+                WHERE batch_id = %s
+                """,
+                (batch_text, delivery_type, sort_order, active_value, batch_id),
+            )
+            if cursor.rowcount == 0:
+                cursor.execute("SELECT batch_id FROM shipping_batches WHERE batch_id = %s", (batch_id,))
+                if not cursor.fetchone():
+                    conn.rollback()
+                    return _frontend_redirect(error="找不到這筆船班。")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return _frontend_redirect(message=f"船班 #{batch_id} 已更新。")
+
+
+@app.post("/frontend-settings/batches/{batch_id}/delete")
+def frontend_delete_shipping_batch(
+    request: Request,
+    batch_id: int,
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM shipping_batches WHERE batch_id = %s", (batch_id,))
+            deleted = cursor.rowcount
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    if not deleted:
+        return _frontend_redirect(error="找不到這筆船班。")
+    return _frontend_redirect(message=f"船班 #{batch_id} 已刪除。")
