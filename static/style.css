@@ -2869,3 +2869,159 @@ summary .auto-line-icon { margin-right: .42em; }
   .forwarding-actions { width: 100%; }
   .forwarding-actions > * { flex: 1; }
 }
+
+
+/* ======================================================
+   匿名回饋管理
+====================================================== */
+.feedback-filter-card,
+.feedback-card {
+    background: #fff;
+    border: 1px solid #ececec;
+    border-radius: 16px;
+    padding: 20px;
+    margin-top: 20px;
+}
+.feedback-filter-grid {
+    display: grid;
+    grid-template-columns: 1.6fr .8fr auto;
+    gap: 16px;
+    align-items: end;
+}
+.feedback-filter-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.feedback-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin: 20px 0 0;
+}
+.feedback-toolbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+.feedback-select-all {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    color: #666;
+    font-size: 14px;
+    white-space: nowrap;
+}
+.feedback-batch-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex: 1;
+    justify-content: flex-end;
+}
+.feedback-batch-controls select,
+.feedback-batch-controls input {
+    border: 1px solid #dedede;
+    border-radius: 10px;
+    min-height: 42px;
+    padding: 9px 11px;
+    background: #fff;
+}
+.feedback-batch-controls input {
+    width: min(360px, 42vw);
+}
+.feedback-apply-btn {
+    border: 1px solid #f29a38;
+    background: #f29a38;
+    color: #fff;
+    border-radius: 10px;
+    min-height: 42px;
+    padding: 9px 15px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+}
+.feedback-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #eee;
+    border-radius: 12px;
+}
+.feedback-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 1000px;
+}
+.feedback-table th {
+    background: #fafafa;
+    color: #888;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    padding: 13px 14px;
+}
+.feedback-table td {
+    border-top: 1px solid #eee;
+    padding: 14px;
+    font-size: 14px;
+    vertical-align: top;
+}
+.feedback-content {
+    min-width: 330px;
+    max-width: 520px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.65;
+}
+.feedback-note {
+    min-width: 220px;
+    max-width: 340px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #666;
+}
+.feedback-created-at {
+    white-space: nowrap;
+    color: #777;
+}
+.feedback-status {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 5px 9px;
+    font-size: 12px;
+    white-space: nowrap;
+    background: #f1f2f4;
+    color: #666;
+}
+.feedback-status.status-未處理 { background: #fff3df; color: #a86600; }
+.feedback-status.status-已讀 { background: #eef5ff; color: #416ea8; }
+.feedback-status.status-已回覆 { background: #eaf7ef; color: #34764d; }
+.feedback-status.status-忽略 { background: #f1f1f1; color: #777; }
+.feedback-msg {
+    margin-top: 18px;
+    border-radius: 10px;
+    padding: 11px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+.feedback-success { background: #eaf7ef; color: #34764d; }
+.feedback-error { background: #fff0ef; color: #a94c42; }
+@media (max-width: 1000px) {
+    .feedback-summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .feedback-toolbar { align-items: flex-start; flex-direction: column; }
+    .feedback-batch-controls { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+}
+@media (max-width: 768px) {
+    .feedback-filter-grid { grid-template-columns: 1fr; }
+    .feedback-filter-actions { width: 100%; }
+    .feedback-filter-actions > * { flex: 1; }
+    .feedback-summary-grid { grid-template-columns: 1fr; }
+    .feedback-batch-controls { flex-direction: column; align-items: stretch; }
+    .feedback-batch-controls input { width: 100%; }
+    .feedback-apply-btn { justify-content: center; }
+}
