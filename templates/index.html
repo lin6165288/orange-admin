@@ -8,7 +8,7 @@
   </div>
 </div>
 
-<div class="dashboard-grid">
+<div class="dashboard-grid dashboard-grid-six">
   <a class="dashboard-card dashboard-card-link" href="/orders">
     <div class="card-icon"><i class="bi bi-box-seam"></i></div>
     <div class="dashboard-card-copy">
@@ -19,22 +19,52 @@
     <i class="bi bi-chevron-right dashboard-card-arrow"></i>
   </a>
 
-  <a class="dashboard-card dashboard-card-link" href="/shipping">
-    <div class="card-icon"><i class="bi bi-truck"></i></div>
-    <div class="dashboard-card-copy">
-      <div class="card-label">可出貨</div>
-      <div class="card-value">{{ ready_orders }} <small>筆</small></div>
-      <div class="card-note">依目前出貨判定條件</div>
-    </div>
-    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
-  </a>
-
   <a class="dashboard-card dashboard-card-link" href="/orders">
     <div class="card-icon"><i class="bi bi-bar-chart"></i></div>
     <div class="dashboard-card-copy">
       <div class="card-label">{{ month_label }}代購訂單</div>
       <div class="card-value">{{ month_purchase_orders }} <small>筆</small></div>
-      <div class="card-note">本月統計，不含平台「集運」</div>
+      <div class="card-note">不含平台「集運」</div>
+    </div>
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+
+  <a class="dashboard-card dashboard-card-link" href="/shipping">
+    <div class="card-icon"><i class="bi bi-truck"></i></div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">可出貨</div>
+      <div class="card-value">{{ ready_orders }} <small>筆</small></div>
+      <div class="card-note">目前名單約 {{ '%.2f'|format(ready_weight) }} kg</div>
+    </div>
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+
+  <a class="dashboard-card dashboard-card-link" href="/members">
+    <div class="card-icon"><i class="bi bi-people"></i></div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">會員總數</div>
+      <div class="card-value">{{ total_members }} <small>位</small></div>
+      <div class="card-note">members 會員資料</div>
+    </div>
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+
+  <a class="dashboard-card dashboard-card-link" href="/members">
+    <div class="card-icon"><i class="bi bi-link-45deg"></i></div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">LINE 已綁定</div>
+      <div class="card-value">{{ line_bound }} <small>位</small></div>
+      <div class="card-note">已有 LINE User ID</div>
+    </div>
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+
+  <a class="dashboard-card dashboard-card-link" href="/members">
+    <div class="card-icon"><i class="bi bi-percent"></i></div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">LINE 綁定率</div>
+      <div class="card-value">{{ '%.1f'|format(binding_rate) }}<small>%</small></div>
+      <div class="card-note">已綁定 ÷ 會員總數</div>
     </div>
     <i class="bi bi-chevron-right dashboard-card-arrow"></i>
   </a>

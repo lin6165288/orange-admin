@@ -1,237 +1,97 @@
 {% extends "base.html" %}
-
-
-{% block title %}
-訂單查詢｜橘貓代購
-{% endblock %}
-
-
+{% block title %}訂單管理｜橘貓代購{% endblock %}
 {% block content %}
-
 <div class="page-header">
-
-    <div>
-
-        <h1>
-            🔍 訂單查詢
-        </h1>
-
-        <p>
-            可使用一個或多個條件精準搜尋訂單
-        </p>
-
-    </div>
-
+  <div>
+    <h1><span class="page-title-icon"><i class="bi bi-search"></i></span>訂單管理</h1>
+    <p>整合訂單總表、搜尋與編輯。預設直接顯示最近 100 筆訂單。</p>
+  </div>
+  <a class="search-button orders-new-link" href="/orders/new">
+    <i class="bi bi-plus-square"></i><span>新增訂單</span>
+  </a>
 </div>
 
+<section class="search-card">
+  <form
+    id="order-search-form"
+    hx-get="/orders/search"
+    hx-target="#order-results"
+    hx-swap="innerHTML"
+    hx-indicator="#order-search-loading"
+  >
+    <div class="search-grid">
+      <div class="search-field">
+        <label>訂單編號</label>
+        <input name="search_order_id" inputmode="numeric" value="{{ search_order_id }}" placeholder="精準搜尋">
+      </div>
 
-<div class="search-card">
+      <div class="search-field">
+        <label>客戶姓名</label>
+        <input name="search_customer_name" value="{{ search_customer_name }}" placeholder="可輸入部分姓名">
+      </div>
 
-    <form
-        id="search-form"
+      <div class="search-field">
+        <label>包裹單號</label>
+        <input name="search_tracking_number" value="{{ search_tracking_number }}" placeholder="可輸入部分單號">
+      </div>
 
-        hx-get="/orders/search"
-
-        hx-target="#order-results"
-
-        hx-trigger="submit"
-
-        hx-indicator="#search-loading"
-    >
-
-        <div class="search-grid">
-
-
-            <div class="search-field">
-
-                <label>
-                    訂單編號
-                </label>
-
-                <input
-                    type="number"
-
-                    name="search_order_id"
-
-                    placeholder="輸入訂單編號"
-
-                    autocomplete="off"
-                >
-
-            </div>
-
-
-            <div class="search-field">
-
-                <label>
-                    客戶姓名
-                </label>
-
-                <input
-                    type="text"
-
-                    name="search_customer_name"
-
-                    placeholder="輸入客戶姓名"
-
-                    autocomplete="off"
-                >
-
-            </div>
-
-
-            <div class="search-field">
-
-                <label>
-                    物流單號
-                </label>
-
-                <input
-                    type="text"
-
-                    name="search_tracking_number"
-
-                    placeholder="輸入物流單號"
-
-                    autocomplete="off"
-                >
-
-            </div>
-
-
-            <div class="search-field">
-
-                <label>
-                    人民幣金額
-                </label>
-
-                <div class="search-prefix">
-
-                    <span>
-                        ¥
-                    </span>
-
-                    <input
-                        type="number"
-
-                        name="search_amount_rmb"
-
-                        placeholder="輸入金額"
-
-                        min="0"
-
-                        step="0.01"
-                    >
-
-                </div>
-
-            </div>
-
-
-            <div class="search-field">
-
-                <label>
-                    平台
-                </label>
-
-                <input
-                    type="text"
-
-                    name="search_platform"
-
-                    placeholder="輸入平台"
-
-                    autocomplete="off"
-                >
-
-            </div>
-
-
-            <div class="search-field">
-
-                <label>
-                    下單日期
-                </label>
-
-                <input
-                    type="date"
-
-                    name="search_order_date"
-                >
-
-            </div>
-
-
+      <div class="search-field">
+        <label>人民幣金額</label>
+        <div class="search-prefix">
+          <span>¥</span>
+          <input name="search_amount_rmb" inputmode="decimal" value="{{ search_amount_rmb }}" placeholder="精準金額">
         </div>
+      </div>
 
+      <div class="search-field">
+        <label>平台</label>
+        <select name="search_platform">
+          <option value="">全部平台</option>
+          {% for platform in platforms %}
+          <option value="{{ platform }}" {% if search_platform == platform %}selected{% endif %}>{{ platform }}</option>
+          {% endfor %}
+        </select>
+      </div>
 
-        <div class="search-footer">
+      <div class="search-field">
+        <label>下單日期</label>
+        <input type="date" name="search_order_date" value="{{ search_order_date }}">
+      </div>
 
+      <div class="search-field">
+        <label>到貨狀態</label>
+        <select name="search_arrived_status">
+          <option value="" {% if not search_arrived_status %}selected{% endif %}>全部</option>
+          <option value="arrived" {% if search_arrived_status == 'arrived' %}selected{% endif %}>已到貨</option>
+          <option value="unarrived" {% if search_arrived_status == 'unarrived' %}selected{% endif %}>未到貨</option>
+        </select>
+      </div>
 
-            <label class="filter-check">
-
-                <input
-                    type="checkbox"
-
-                    name="unreturned"
-
-                    value="1"
-                >
-
-                只看未運回
-
-            </label>
-
-
-            <div class="search-actions">
-
-                <a
-                    href="/orders"
-
-                    class="clear-filter-button"
-                >
-                    清除條件
-                </a>
-
-
-                <button
-                    type="submit"
-
-                    class="search-button"
-                >
-                    🔍 查詢
-                </button>
-
-            </div>
-
-
-        </div>
-
-
-    </form>
-
-
-    <div
-        id="search-loading"
-
-        class="htmx-indicator"
-    >
-        查詢中...
+      <div class="search-field">
+        <label>運回狀態</label>
+        <select name="search_returned_status">
+          <option value="" {% if not search_returned_status %}selected{% endif %}>全部</option>
+          <option value="returned" {% if search_returned_status == 'returned' %}selected{% endif %}>已運回</option>
+          <option value="unreturned" {% if search_returned_status == 'unreturned' %}selected{% endif %}>未運回</option>
+        </select>
+      </div>
     </div>
 
-
-</div>
-
+    <div class="search-footer">
+      <div class="orders-search-hint">
+        <i class="bi bi-info-circle"></i>
+        <span>不輸入條件時會顯示最近 100 筆；有篩選時最多顯示 300 筆。</span>
+      </div>
+      <div class="search-actions">
+        <a class="clear-filter-button" href="/orders"><i class="bi bi-arrow-counterclockwise"></i><span>清除</span></a>
+        <button class="search-button" type="submit"><i class="bi bi-search"></i><span>套用篩選</span></button>
+      </div>
+    </div>
+    <div id="order-search-loading" class="htmx-indicator orders-loading">讀取中…</div>
+  </form>
+</section>
 
 <div id="order-results">
-
-    <div class="empty-state">
-
-        輸入上方條件開始查詢
-
-    </div>
-
+  {% include "order_results.html" %}
 </div>
-
-
 {% endblock %}

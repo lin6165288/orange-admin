@@ -1,251 +1,103 @@
-{% if orders %}
-
-
-<div class="result-summary">
-
-
-    <div class="summary-card">
-
-        <span>
-            符合訂單
-        </span>
-
-        <strong>
-            {{ total_count }}
-        </strong>
-
-        <small>
-            筆
-        </small>
-
-    </div>
-
-
-    <div class="summary-card">
-
-        <span>
-            總重量
-        </span>
-
-        <strong>
-            {{ "%.2f"|format(total_weight) }}
-        </strong>
-
-        <small>
-            kg
-        </small>
-
-    </div>
-
-
-</div>
-
-
-{% if total_count > orders|length %}
-
-<div class="result-header">
-
-    共 {{ total_count }} 筆，
-    目前顯示最近 {{ orders|length }} 筆
-
-</div>
-
-{% else %}
-
-<div class="result-header">
-
-    共找到 {{ total_count }} 筆訂單
-
-</div>
-
+{% if search_error %}
+<div class="order-search-error"><i class="bi bi-exclamation-circle"></i><span>{{ search_error }}</span></div>
 {% endif %}
 
+<div class="result-summary">
+  <div class="summary-card">
+    <span>符合訂單</span>
+    <strong>{{ total_count }}</strong><small>筆</small>
+  </div>
+  <div class="summary-card">
+    <span>總重量</span>
+    <strong>{{ "%.2f"|format(total_weight) }}</strong><small>kg</small>
+  </div>
+  <div class="summary-card">
+    <span>目前顯示</span>
+    <strong>{{ showing_count }}</strong><small>筆</small>
+  </div>
+</div>
 
+<div class="result-header">
+  {% if is_default_view %}
+    最近訂單
+  {% else %}
+    篩選結果
+  {% endif %}
+  {% if total_count > showing_count %}
+    ・共 {{ total_count }} 筆，目前顯示前 {{ showing_count }} 筆
+  {% endif %}
+</div>
+
+{% if orders %}
 <div class="table-card">
-
-    <table class="order-table">
-
-        <thead>
-
-            <tr>
-
-                <th>訂單編號</th>
-
-                <th>日期</th>
-
-                <th>姓名</th>
-
-                <th>平台</th>
-
-                <th>物流單號</th>
-
-                <th>人民幣</th>
-
-                <th>重量</th>
-
-                <th>狀態</th>
-
-            </tr>
-
-        </thead>
-
-
-        <tbody>
-
-
-        {% for order in orders %}
-
-
-            <tr
-                class="order-row"
-
-                hx-get="/orders/{{ order.order_id }}/detail"
-
-                hx-target="#detail-{{ order.order_id }}"
-
-                hx-swap="innerHTML"
-
-                hx-include="#search-form"
-
-                title="點擊查看訂單詳情"
-            >
-
-
-                <td>
-
-                    <span class="order-number">
-
-                        #{{ order.order_id }}
-
-                    </span>
-
-                </td>
-
-
-                <td>
-                    {{ order.order_time or "-" }}
-                </td>
-
-
-                <td class="customer-name">
-                    {{ order.customer_name or "-" }}
-                </td>
-
-
-                <td>
-                    {{ order.platform or "-" }}
-                </td>
-
-
-                <td>
-                    {{ order.tracking_number or "-" }}
-                </td>
-
-
-                <td>
-
-                    {% if order.amount_rmb is not none %}
-
-                        ¥{{ order.amount_rmb }}
-
-                    {% else %}
-
-                        -
-
-                    {% endif %}
-
-                </td>
-
-
-                <td>
-
-                    {% if order.weight_kg is not none %}
-
-                        {{ order.weight_kg }} kg
-
-                    {% else %}
-
-                        -
-
-                    {% endif %}
-
-                </td>
-
-
-                <td>
-
-
-                    {% if order.order_status == "取消" %}
-
-                        <span class="status status-cancel">
-                            取消
-                        </span>
-
-
-                    {% elif order.is_returned %}
-
-                        <span class="status status-returned">
-                            已運回
-                        </span>
-
-
-                    {% elif order.is_arrived %}
-
-                        <span class="status status-arrived">
-                            已到貨
-                        </span>
-
-
-                    {% else %}
-
-                        <span class="status status-normal">
-                            運送中
-                        </span>
-
-
-                    {% endif %}
-
-
-                </td>
-
-
-            </tr>
-
-
-            <tr class="order-detail-row">
-
-                <td colspan="8">
-
-                    <div
-                        id="detail-{{ order.order_id }}"
-
-                        class="order-detail-container"
-                    ></div>
-
-                </td>
-
-            </tr>
-
-
-        {% endfor %}
-
-
-        </tbody>
-
-
-    </table>
-
+  <table class="order-table">
+    <thead>
+      <tr>
+        <th>訂單</th>
+        <th>下單日期</th>
+        <th>客戶</th>
+        <th>平台</th>
+        <th>包裹單號</th>
+        <th>人民幣</th>
+        <th>重量</th>
+        <th>狀態</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% set filter_values = {
+      "search_order_id": search_order_id,
+      "search_customer_name": search_customer_name,
+      "search_tracking_number": search_tracking_number,
+      "search_amount_rmb": search_amount_rmb,
+      "search_platform": search_platform,
+      "search_order_date": search_order_date,
+      "search_arrived_status": search_arrived_status,
+      "search_returned_status": search_returned_status,
+      "unreturned": unreturned
+    } %}
+    {% for order in orders %}
+      <tr
+        class="order-row"
+        hx-get="/orders/{{ order.order_id }}/detail"
+        hx-vals='{{ filter_values|tojson|forceescape }}'
+        hx-target="#order-detail-{{ order.order_id }}"
+        hx-swap="innerHTML"
+      >
+        <td><span class="order-number">#{{ order.order_id }}</span></td>
+        <td>{{ order.order_time or "—" }}</td>
+        <td class="customer-name">{{ order.customer_name or "—" }}</td>
+        <td>{{ order.platform or "—" }}</td>
+        <td class="tracking-cell">{{ order.tracking_number or "—" }}</td>
+        <td>{% if order.amount_rmb is not none %}¥{{ order.amount_rmb }}{% else %}—{% endif %}</td>
+        <td>{% if order.weight_kg is not none %}{{ order.weight_kg }} kg{% else %}—{% endif %}</td>
+        <td>
+          {% if order.order_status == "取消" %}
+            <span class="status status-cancel">已取消</span>
+          {% elif order.is_returned %}
+            <span class="status status-returned">已運回</span>
+          {% elif order.is_arrived %}
+            <span class="status status-arrived">已到貨</span>
+          {% else %}
+            <span class="status status-normal">運送中</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr class="order-detail-row">
+        <td colspan="8">
+          <div id="order-detail-{{ order.order_id }}" class="order-detail-container"></div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
 </div>
-
-
 {% else %}
-
-
 <div class="empty-state">
-
-    找不到符合條件的訂單
-
+  <i class="bi bi-inbox"></i>
+  {% if search_error %}
+    請修正搜尋條件後再試一次。
+  {% else %}
+    目前沒有符合條件的訂單。
+  {% endif %}
 </div>
-
-
 {% endif %}

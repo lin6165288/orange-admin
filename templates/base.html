@@ -7,7 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    <link rel="stylesheet" href="/static/style.css?v=24">
+    <link rel="stylesheet" href="/static/style.css?v=27">
 </head>
 <body>
 <div class="app">
@@ -16,62 +16,75 @@
             <span class="brand-mark"><i class="bi bi-heart"></i></span>
             <span class="brand-name">橘貓代購</span>
         </div>
-        <div class="menu-title">後台管理</div>
 
-        <a class="menu-item {% if request.url.path == '/' %}active{% endif %}" href="/">
-            <span class="menu-icon"><i class="bi bi-grid-1x2"></i></span>
-            <span class="menu-label">儀表板</span>
-        </a>
+        <nav class="sidebar-nav" aria-label="後台功能">
+            <div class="menu-section">
+                <div class="menu-section-title">營運概況</div>
+                <a class="menu-item {% if request.url.path == '/' %}active{% endif %}" href="/" title="儀表板">
+                    <span class="menu-icon"><i class="bi bi-grid-1x2"></i></span>
+                    <span class="menu-label">儀表板</span>
+                </a>
+            </div>
 
-        <a class="menu-item {% if request.url.path == '/orders' or request.url.path.startswith('/orders/search') %}active{% endif %}" href="/orders">
-            <span class="menu-icon"><i class="bi bi-search"></i></span>
-            <span class="menu-label">訂單查詢</span>
-        </a>
+            <div class="menu-section">
+                <div class="menu-section-title">訂單與物流</div>
+                <a class="menu-item {% if request.url.path == '/orders' or request.url.path.startswith('/orders/search') or request.url.path.startswith('/orders/') and not request.url.path.startswith('/orders/new') %}active{% endif %}" href="/orders" title="訂單查詢">
+                    <span class="menu-icon"><i class="bi bi-search"></i></span>
+                    <span class="menu-label">訂單查詢</span>
+                </a>
 
-        <a class="menu-item {% if request.url.path.startswith('/orders/new') %}active{% endif %}" href="/orders/new">
-            <span class="menu-icon"><i class="bi bi-plus-square"></i></span>
-            <span class="menu-label">新增訂單</span>
-        </a>
+                <a class="menu-item {% if request.url.path.startswith('/orders/new') %}active{% endif %}" href="/orders/new" title="新增訂單">
+                    <span class="menu-icon"><i class="bi bi-plus-square"></i></span>
+                    <span class="menu-label">新增訂單</span>
+                </a>
 
-        <a class="menu-item {% if request.url.path.startswith('/inbound') %}active{% endif %}" href="/inbound">
-            <span class="menu-icon"><i class="bi bi-box-arrow-in-down"></i></span>
-            <span class="menu-label">入庫管理</span>
-        </a>
+                <a class="menu-item {% if request.url.path.startswith('/inbound') %}active{% endif %}" href="/inbound" title="入庫管理">
+                    <span class="menu-icon"><i class="bi bi-box-arrow-in-down"></i></span>
+                    <span class="menu-label">入庫管理</span>
+                </a>
 
-        <a class="menu-item {% if request.url.path.startswith('/shipping') %}active{% endif %}" href="/shipping">
-            <span class="menu-icon"><i class="bi bi-truck"></i></span>
-            <span class="menu-label">出貨管理</span>
-        </a>
+                <a class="menu-item {% if request.url.path.startswith('/shipping') %}active{% endif %}" href="/shipping" title="出貨管理">
+                    <span class="menu-icon"><i class="bi bi-truck"></i></span>
+                    <span class="menu-label">出貨管理</span>
+                </a>
+            </div>
 
-        <a class="menu-item {% if request.url.path.startswith('/members') %}active{% endif %}" href="/members">
-            <span class="menu-icon"><i class="bi bi-people"></i></span>
-            <span class="menu-label">會員管理</span>
-        </a>
+            <div class="menu-section">
+                <div class="menu-section-title">會員與前台</div>
+                <a class="menu-item {% if request.url.path.startswith('/members') %}active{% endif %}" href="/members" title="會員管理">
+                    <span class="menu-icon"><i class="bi bi-people"></i></span>
+                    <span class="menu-label">會員管理</span>
+                </a>
 
-        <a class="menu-item {% if request.url.path.startswith('/profit') %}active{% endif %}" href="/profit">
-            <span class="menu-icon"><i class="bi bi-graph-up"></i></span>
-            <span class="menu-label">利潤報表</span>
-        </a>
+                <a class="menu-item {% if request.url.path.startswith('/forwarding-registers') %}active{% endif %}" href="/forwarding-registers" title="集運登記">
+                    <span class="menu-icon"><i class="bi bi-box-arrow-in-right"></i></span>
+                    <span class="menu-label">集運登記</span>
+                </a>
 
-        <a class="menu-item {% if request.url.path.startswith('/frontend-settings') %}active{% endif %}" href="/frontend-settings">
-            <span class="menu-icon"><i class="bi bi-megaphone"></i></span>
-            <span class="menu-label">前台設定</span>
-        </a>
+                <a class="menu-item {% if request.url.path.startswith('/feedbacks') %}active{% endif %}" href="/feedbacks" title="匿名回饋">
+                    <span class="menu-icon"><i class="bi bi-chat-dots"></i></span>
+                    <span class="menu-label">匿名回饋</span>
+                </a>
 
-        <a class="menu-item {% if request.url.path.startswith('/forwarding-registers') %}active{% endif %}" href="/forwarding-registers">
-            <span class="menu-icon"><i class="bi bi-box-arrow-in-right"></i></span>
-            <span class="menu-label">集運登記</span>
-        </a>
+                <a class="menu-item {% if request.url.path.startswith('/frontend-settings') %}active{% endif %}" href="/frontend-settings" title="前台設定">
+                    <span class="menu-icon"><i class="bi bi-megaphone"></i></span>
+                    <span class="menu-label">前台設定</span>
+                </a>
+            </div>
 
-        <a class="menu-item {% if request.url.path.startswith('/feedbacks') %}active{% endif %}" href="/feedbacks">
-            <span class="menu-icon"><i class="bi bi-chat-dots"></i></span>
-            <span class="menu-label">匿名回饋</span>
-        </a>
+            <div class="menu-section">
+                <div class="menu-section-title">財務與系統</div>
+                <a class="menu-item {% if request.url.path.startswith('/profit') %}active{% endif %}" href="/profit" title="利潤報表">
+                    <span class="menu-icon"><i class="bi bi-graph-up"></i></span>
+                    <span class="menu-label">利潤報表</span>
+                </a>
 
-        <a class="menu-item {% if request.url.path.startswith('/audit-logs') %}active{% endif %}" href="/audit-logs">
-            <span class="menu-icon"><i class="bi bi-clock-history"></i></span>
-            <span class="menu-label">操作紀錄</span>
-        </a>
+                <a class="menu-item {% if request.url.path.startswith('/audit-logs') %}active{% endif %}" href="/audit-logs" title="操作紀錄">
+                    <span class="menu-icon"><i class="bi bi-clock-history"></i></span>
+                    <span class="menu-label">操作紀錄</span>
+                </a>
+            </div>
+        </nav>
     </aside>
 
     <main class="content">
