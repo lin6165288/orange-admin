@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}前台設定｜橘貓代購{% endblock %}
+{% block content %}
+<div class="page-header frontend-page-head">
+  <div>
+    <h1><span class="page-title-icon"><i class="bi bi-megaphone"></i></span>前台設定</h1>
+    <p>管理前台訂單更新時間、顯示匯率與近期運回船班。</p>
+  </div>
+</div>
+
+{% if message %}
+<div class="frontend-message success"><i class="bi bi-check2-circle"></i><span>{{ message }}</span></div>
+{% endif %}
+{% if error %}
+<div class="frontend-message error"><i class="bi bi-exclamation-circle"></i><span>{{ error }}</span></div>
+{% endif %}
+
+<div class="frontend-grid">
+  <section class="frontend-card">
+    <div class="frontend-card-head">
+      <div class="frontend-card-icon"><i class="bi bi-clock-history"></i></div>
+      <div>
+        <h2>訂單資料更新時間</h2>
+        <p>前台用來告知客戶「訂單資料更新到什麼時間」。</p>
+      </div>
+    </div>
+    <div class="frontend-current-value">
+      <span>目前前台顯示</span>
+      <strong>{{ orders_last_update_time }}</strong>
+    </div>
+    <form method="post" action="/frontend-settings/update-order-time">
+      <button type="submit" class="frontend-primary"><i class="bi bi-arrow-clockwise"></i><span>更新為現在時間</span></button>
+    </form>
+  </section>
+
+  <section class="frontend-card">
+    <div class="frontend-card-head">
+      <div class="frontend-card-icon"><i class="bi bi-currency-exchange"></i></div>
+      <div>
+        <h2>前台顯示匯率</h2>
+        <p>此處只控制客戶前台顯示的匯率，與「利潤報表」每月成本／定價匯率分開管理。</p>
+      </div>
+    </div>
+    <form method="post" action="/frontend-settings/exchange-rate" class="frontend-rate-form">
+      <label>
+        <span>目前匯率</span>
+        <input type="number" name="exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(current_rate) }}" required>
+      </label>
+      <button type="submit" class="frontend-primary"><i class="bi bi-floppy"></i><span>儲存匯率</span></button>
+    </form>
+  </section>
+</div>
+
+<section class="frontend-card frontend-batch-section">
+  <div class="frontend-section-head">
+    <div>
+      <h2><span class="section-title-icon"><i class="bi bi-water"></i></span>近期運回船班</h2>
+      <p>前台運回申請會依「宅配／賣貨便」顯示目前啟用中的船班。</p>
+    </div>
+  </div>
+
+  <form method="post" action="/frontend-settings/batches/add" class="frontend-batch-add">
+    <div class="frontend-field">
+      <label>適用運回方式</label>
+      <select name="delivery_type">
+        <option value="home_delivery">宅配</option>
+        <option value="shop_delivery">賣貨便</option>
+      </select>
+    </div>
+    <div class="frontend-field frontend-batch-text-field">
+      <label>船班文字</label>
+      <input type="text" name="batch_text" maxlength="255" placeholder="例如：10/5 海快船班｜預計 10/8-10/9 到台" required>
+    </div>
+    <div class="frontend-field frontend-sort-field">
+      <label>排序</label>
+      <input type="number" name="sort_order" min="0" max="9999" value="0" step="1">
+    </div>
+    <div class="frontend-add-action">
+      <button type="submit" class="frontend-primary"><i class="bi bi-plus-lg"></i><span>新增船班</span></button>
+    </div>
+  </form>
+
+  {% if batches %}
+  <div class="frontend-batch-list">
+    {% for batch in batches %}
+    <article class="frontend-batch-item {% if not batch.is_active_bool %}inactive{% endif %}">
+      <div class="frontend-batch-meta">
+        <span class="frontend-batch-id">#{{ batch.batch_id }}</span>
+        <span class="frontend-batch-type">{{ batch.delivery_label }}</span>
+        {% if batch.is_active_bool %}
+          <span class="frontend-status active">顯示中</span>
+        {% else %}
+          <span class="frontend-status hidden">已隱藏</span>
+        {% endif %}
+        <span class="frontend-batch-updated">更新：{{ batch.updated_at }}</span>
+      </div>
+
+      <form method="post" action="/frontend-settings/batches/{{ batch.batch_id }}/save" class="frontend-batch-edit">
+        <div class="frontend-field">
+          <label>運回方式</label>
+          <select name="delivery_type">
+            <option value="home_delivery" {% if batch.delivery_type == 'home_delivery' %}selected{% endif %}>宅配</option>
+            <option value="shop_delivery" {% if batch.delivery_type == 'shop_delivery' %}selected{% endif %}>賣貨便</option>
+          </select>
+        </div>
+        <div class="frontend-field frontend-batch-text-field">
+          <label>船班內容</label>
+          <input type="text" name="batch_text" maxlength="255" value="{{ batch.batch_text }}" required>
+        </div>
+        <div class="frontend-field frontend-sort-field">
+          <label>排序</label>
+          <input type="number" name="sort_order" min="0" max="9999" value="{{ batch.sort_order }}" step="1">
+        </div>
+        <label class="frontend-active-check">
+          <input type="checkbox" name="is_active" value="1" {% if batch.is_active_bool %}checked{% endif %}>
+          <span>前台顯示</span>
+        </label>
+        <button type="submit" class="frontend-save-btn"><i class="bi bi-floppy"></i><span>儲存</span></button>
+      </form>
+
+      <form method="post" action="/frontend-settings/batches/{{ batch.batch_id }}/delete" class="frontend-delete-form" onsubmit="return confirm('確定要刪除船班 #{{ batch.batch_id }} 嗎？刪除後無法復原。')">
+        <button type="submit" class="frontend-delete-btn"><i class="bi bi-trash3"></i><span>刪除此船班</span></button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">目前沒有任何船班設定。</div>
+  {% endif %}
+</section>
+{% endblock %}
