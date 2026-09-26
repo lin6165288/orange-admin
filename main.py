@@ -848,6 +848,78 @@ def display_audit_value(
 # Dashboard
 # =========================================================
 
+def dashboard_stats():
+    """首頁即時統計；所有數字都直接讀正式 orders 資料。"""
+    taipei_now = datetime.now(ZoneInfo("Asia/Taipei"))
+    month_start = taipei_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1)
+
+    ready_filter = """
+        COALESCE(o.is_arrived, 0) = 1
+        AND (
+            COALESCE(o.is_early_returned, 0) = 1
+            OR NOT EXISTS (
+                SELECT 1
+                FROM orders pending
+                WHERE pending.customer_name = o.customer_name
+                  AND COALESCE(pending.is_arrived, 0) = 0
+                  AND COALESCE(pending.is_returned, 0) = 0
+                  AND COALESCE(pending.order_status, '正常') <> '取消'
+            )
+        )
+    """
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM orders
+                WHERE COALESCE(order_status, '正常') <> '取消'
+                """
+            )
+            total_orders = int((cursor.fetchone() or {}).get("cnt") or 0)
+
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM orders o
+                WHERE COALESCE(o.is_returned, 0) = 0
+                  AND COALESCE(o.order_status, '正常') <> '取消'
+                  AND o.customer_name IS NOT NULL
+                  AND TRIM(o.customer_name) <> ''
+                  AND ({ready_filter})
+                """
+            )
+            ready_orders = int((cursor.fetchone() or {}).get("cnt") or 0)
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM orders
+                WHERE order_time >= %s
+                  AND order_time < %s
+                  AND COALESCE(order_status, '正常') <> '取消'
+                  AND COALESCE(platform, '') <> '集運'
+                """,
+                (month_start.date(), next_month.date()),
+            )
+            month_purchase_orders = int((cursor.fetchone() or {}).get("cnt") or 0)
+
+        return {
+            "total_orders": total_orders,
+            "ready_orders": ready_orders,
+            "month_purchase_orders": month_purchase_orders,
+            "month_label": f"{taipei_now.month} 月",
+        }
+    finally:
+        conn.close()
+
+
 @app.get("/")
 async def home(
 
@@ -861,7 +933,7 @@ async def home(
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={}
+        context=dashboard_stats()
     )
 
 
