@@ -2843,3 +2843,252 @@ def shipping_export(
         },
     )
 
+
+
+# =========================================================
+# 前台運回申請管理
+# =========================================================
+
+RETURN_REQUEST_STATUS_LABELS = {
+    "pending": "待處理",
+    "processed": "已處理",
+    "cancelled": "已取消",
+}
+
+
+def ensure_return_request_tables():
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS customer_return_requests (
+                    request_id INT AUTO_INCREMENT PRIMARY KEY,
+                    customer_name VARCHAR(255) NOT NULL,
+                    selected_shipping_batch VARCHAR(255) NOT NULL,
+                    delivery_method VARCHAR(50) NOT NULL DEFAULT '面交/自取',
+                    total_count INT NOT NULL DEFAULT 0,
+                    total_weight DECIMAL(10,3) NOT NULL DEFAULT 0,
+                    estimated_fee DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    status ENUM('pending','processed','cancelled') NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_return_request_status_created (status, created_at),
+                    INDEX idx_return_request_customer (customer_name)
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS customer_return_request_items (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    request_id INT NOT NULL,
+                    order_id INT NOT NULL,
+                    tracking_number VARCHAR(255) NULL,
+                    platform VARCHAR(50) NULL,
+                    weight_kg DECIMAL(10,3) NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_request_order (request_id, order_id),
+                    INDEX idx_return_item_request (request_id),
+                    CONSTRAINT fk_return_req_items_request
+                        FOREIGN KEY (request_id) REFERENCES customer_return_requests(request_id)
+                        ON DELETE CASCADE
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def return_request_rows(status="pending", customer=""):
+    ensure_return_request_tables()
+    status = status if status in ("pending", "processed", "cancelled", "all") else "pending"
+    customer = str(customer or "").strip()[:80]
+    where = []
+    params = []
+    if status != "all":
+        where.append("r.status = %s")
+        params.append(status)
+    if customer:
+        where.append("r.customer_name LIKE %s")
+        params.append(f"%{customer}%")
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    r.request_id,
+                    r.customer_name,
+                    r.selected_shipping_batch,
+                    r.delivery_method,
+                    r.total_count,
+                    r.total_weight,
+                    r.estimated_fee,
+                    r.status,
+                    r.created_at,
+                    r.updated_at
+                FROM customer_return_requests r
+                {where_sql}
+                ORDER BY r.created_at DESC, r.request_id DESC
+                LIMIT 300
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        row["total_weight_num"] = float(row.get("total_weight") or 0)
+        row["estimated_fee_num"] = float(row.get("estimated_fee") or 0)
+        row["status_label"] = RETURN_REQUEST_STATUS_LABELS.get(row.get("status"), row.get("status") or "—")
+    return rows
+
+
+def return_request_context(status="pending", customer="", message="", error=""):
+    rows = return_request_rows(status, customer)
+    return {
+        "status": status if status in ("pending", "processed", "cancelled", "all") else "pending",
+        "customer": str(customer or "").strip()[:80],
+        "requests": rows,
+        "total_count": sum(int(row.get("total_count") or 0) for row in rows),
+        "total_weight": sum(float(row.get("total_weight") or 0) for row in rows),
+        "total_fee": sum(float(row.get("estimated_fee") or 0) for row in rows),
+        "message": message,
+        "error": error,
+    }
+
+
+def fetch_return_request_detail(request_id: int):
+    ensure_return_request_tables()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT request_id, customer_name, selected_shipping_batch,
+                       delivery_method, total_count, total_weight, estimated_fee,
+                       status, created_at, updated_at
+                FROM customer_return_requests
+                WHERE request_id = %s
+                LIMIT 1
+                """,
+                (request_id,),
+            )
+            request_row = cursor.fetchone()
+            if not request_row:
+                return None, []
+            cursor.execute(
+                """
+                SELECT
+                    i.order_id,
+                    COALESCE(o.order_time, NULL) AS order_time,
+                    COALESCE(o.customer_name, %s) AS customer_name,
+                    COALESCE(o.platform, i.platform) AS platform,
+                    COALESCE(o.tracking_number, i.tracking_number) AS tracking_number,
+                    COALESCE(o.weight_kg, i.weight_kg, 0) AS weight_kg,
+                    COALESCE(o.is_arrived, 0) AS is_arrived,
+                    COALESCE(o.is_returned, 0) AS is_returned,
+                    COALESCE(o.remarks, '') AS remarks
+                FROM customer_return_request_items i
+                LEFT JOIN orders o ON o.order_id = i.order_id
+                WHERE i.request_id = %s
+                ORDER BY i.order_id ASC
+                """,
+                (request_row["customer_name"], request_id),
+            )
+            items = cursor.fetchall()
+    finally:
+        conn.close()
+    request_row["total_weight_num"] = float(request_row.get("total_weight") or 0)
+    request_row["estimated_fee_num"] = float(request_row.get("estimated_fee") or 0)
+    for item in items:
+        item["weight_num"] = float(item.get("weight_kg") or 0)
+    return request_row, items
+
+
+@app.get("/shipping/requests")
+def shipping_requests_page(
+    request: Request,
+    status: str = "pending",
+    customer: str = "",
+    message: str = "",
+    admin: str = Depends(verify_admin),
+):
+    context = return_request_context(status, customer, message=message)
+    return templates.TemplateResponse(request=request, name="shipping_requests.html", context=context)
+
+
+@app.get("/shipping/requests/{request_id}/detail")
+def shipping_request_detail(
+    request: Request,
+    request_id: int,
+    admin: str = Depends(verify_admin),
+):
+    request_row, items = fetch_return_request_detail(request_id)
+    if not request_row:
+        raise HTTPException(status_code=404, detail="找不到這筆運回申請")
+    return templates.TemplateResponse(
+        request=request,
+        name="shipping_request_detail.html",
+        context={"request_row": request_row, "items": items},
+    )
+
+
+@app.post("/shipping/requests/apply")
+def shipping_requests_apply(
+    request: Request,
+    selected_request_ids: list[int] = Form([]),
+    action: str = Form(""),
+    status_filter: str = Form("pending"),
+    customer_filter: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    if action not in ("processed", "cancelled"):
+        raise HTTPException(status_code=422, detail="申請操作不正確")
+    ids = [int(x) for x in selected_request_ids]
+    if len(ids) != len(set(ids)) or not 1 <= len(ids) <= 100:
+        raise HTTPException(status_code=422, detail="每次請選擇 1～100 筆不重複申請")
+    ensure_return_request_tables()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            placeholders = ",".join(["%s"] * len(ids))
+            cursor.execute(
+                f"""
+                SELECT request_id, status
+                FROM customer_return_requests
+                WHERE request_id IN ({placeholders})
+                FOR UPDATE
+                """,
+                ids,
+            )
+            current = cursor.fetchall()
+            if len(current) != len(ids):
+                raise HTTPException(status_code=409, detail="部分申請已不存在，請重新整理")
+            non_pending = [row["request_id"] for row in current if row.get("status") != "pending"]
+            if non_pending:
+                raise HTTPException(status_code=409, detail="部分申請已被處理，請重新整理後再操作")
+            cursor.execute(
+                f"UPDATE customer_return_requests SET status = %s WHERE request_id IN ({placeholders}) AND status = 'pending'",
+                [action] + ids,
+            )
+            changed = cursor.rowcount
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    label = RETURN_REQUEST_STATUS_LABELS[action]
+    # 回到待處理頁，避免使用者誤以為已處理的申請仍在待辦。
+    target_status = "pending" if status_filter in ("pending", "all") else status_filter
+    customer_filter = str(customer_filter or "").strip()
+    qs = f"status={quote(target_status)}&customer={quote(customer_filter)}&message={quote(f'已將 {changed} 筆申請標記為{label}。')}"
+    return RedirectResponse(url=f"/shipping/requests?{qs}", status_code=303)
