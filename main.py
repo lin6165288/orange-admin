@@ -2590,12 +2590,13 @@ def _shipping_update_text(remarks, action):
 
 
 def apply_shipping_action(order_ids, action, admin, mode="ready", customer="",
-                          hide_delayed=False, hide_notified=False):
+                          hide_delayed=False, hide_notified=False, max_orders=100):
     """一批訂單同 transaction；無變更不寫 log。出錯時整批回滾。"""
     if action not in SHIPPING_ACTIONS:
         raise HTTPException(status_code=422, detail="無效的出貨操作")
-    if len(order_ids) != len(set(order_ids)) or not 1 <= len(order_ids) <= 100:
-        raise HTTPException(status_code=422, detail="每批請選擇 1～100 筆不重複訂單")
+    max_orders = max(1, min(int(max_orders or 100), 500))
+    if len(order_ids) != len(set(order_ids)) or not 1 <= len(order_ids) <= max_orders:
+        raise HTTPException(status_code=422, detail=f"每批請選擇 1～{max_orders} 筆不重複訂單")
     if any(oid <= 0 for oid in order_ids):
         raise HTTPException(status_code=422, detail="訂單編號不正確")
     if mode not in ("ready", "customer"):
@@ -2690,6 +2691,72 @@ def shipping_apply(request: Request, selected_order_ids: list[int] = Form([]),
     context = shipping_context(mode, customer, hide_delayed, hide_notified,
                                message=message, error=error)
     return templates.TemplateResponse(request=request, name="shipping_body.html", context=context)
+
+
+@app.post("/shipping/apply-customers")
+def shipping_apply_customers(
+    request: Request,
+    selected_customers: list[str] = Form([]),
+    action: str = Form(""),
+    mode: str = Form("ready"),
+    customer: str = Form(""),
+    hide_delayed: str = Form(""),
+    hide_notified: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    """將批次操作套用到勾選客戶在目前名單中的所有未運回訂單。"""
+    _check_same_origin(request)
+    error = ""
+    message = ""
+    try:
+        names = [str(name or "").strip() for name in selected_customers]
+        names = [name for name in names if name]
+        if len(names) != len(set(names)) or not 1 <= len(names) <= 100:
+            raise HTTPException(status_code=422, detail="每批請選擇 1～100 位不重複客戶")
+        if action not in SHIPPING_ACTIONS:
+            raise HTTPException(status_code=422, detail="請先選擇有效的批次操作")
+
+        visible_rows, _ = shipping_rows(
+            mode, customer, hide_delayed == "1", hide_notified == "1"
+        )
+        visible_names = {row["customer_name"] for row in visible_rows}
+        if not set(names).issubset(visible_names):
+            raise HTTPException(status_code=409, detail="客戶名單已變動，請更新列表後重新勾選")
+
+        chosen = set(names)
+        order_ids = [
+            int(row["order_id"])
+            for row in visible_rows
+            if row["customer_name"] in chosen and not row.get("is_returned")
+        ]
+        if not order_ids:
+            raise HTTPException(status_code=409, detail="勾選客戶目前沒有可批次處理的未運回訂單")
+        if len(order_ids) > 500:
+            raise HTTPException(status_code=422, detail="勾選客戶對應超過 500 筆訂單，請分批處理")
+
+        changed = apply_shipping_action(
+            order_ids, action, admin, mode, customer,
+            hide_delayed == "1", hide_notified == "1",
+            max_orders=500,
+        )
+        customer_count = len(names)
+        message = (
+            f"{SHIPPING_ACTIONS[action]}：已對 {customer_count} 位客戶執行，成功更新 {changed} 筆訂單，並記錄變更。"
+            if changed else
+            f"勾選的 {customer_count} 位客戶目前沒有需要更新的欄位。"
+        )
+    except HTTPException as exc:
+        if exc.status_code not in (409, 422):
+            raise
+        error = str(exc.detail)
+
+    context = shipping_context(
+        mode, customer, hide_delayed, hide_notified,
+        message=message, error=error
+    )
+    return templates.TemplateResponse(
+        request=request, name="shipping_body.html", context=context
+    )
 
 
 # =========================================================
