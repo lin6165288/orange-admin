@@ -3506,8 +3506,9 @@ def member_edit_save(
 
 
 # =========================================================
-# 利潤報表 / 匯出（沿用舊 Streamlit 計算邏輯）
+# 利潤報表 / 每月匯率設定 / 匯出
 # =========================================================
+
 
 def _profit_decimal(value, default="0"):
     try:
@@ -3521,6 +3522,96 @@ def _profit_parse_date(value: str, fallback):
         return datetime.strptime(str(value or ""), "%Y-%m-%d").date()
     except ValueError:
         return fallback
+
+
+def _profit_valid_month(value: str, fallback=None):
+    value = str(value or "").strip()
+    try:
+        return datetime.strptime(value, "%Y-%m").strftime("%Y-%m")
+    except ValueError:
+        return fallback
+
+
+def ensure_profit_monthly_rates_table():
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS profit_monthly_rates (
+                    rate_month CHAR(7) NOT NULL PRIMARY KEY,
+                    rmb_rate DECIMAL(10,4) NOT NULL,
+                    payment_sell_rate DECIMAL(10,4) NOT NULL,
+                    purchase_sell_rate DECIMAL(10,4) NOT NULL,
+                    updated_by VARCHAR(100) NULL,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _profit_rate_history(limit=36):
+    ensure_profit_monthly_rates_table()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT rate_month, rmb_rate, payment_sell_rate,
+                       purchase_sell_rate, updated_by, updated_at
+                FROM profit_monthly_rates
+                ORDER BY rate_month DESC
+                LIMIT %s
+                """,
+                (int(limit),),
+            )
+            return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def _profit_rates_for_months(months):
+    months = [m for m in dict.fromkeys(months) if _profit_valid_month(m)]
+    if not months:
+        return {}
+    ensure_profit_monthly_rates_table()
+    placeholders = ",".join(["%s"] * len(months))
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT rate_month, rmb_rate, payment_sell_rate, purchase_sell_rate,
+                       updated_by, updated_at
+                FROM profit_monthly_rates
+                WHERE rate_month IN ({placeholders})
+                """,
+                months,
+            )
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+    return {str(row["rate_month"]): row for row in rows}
+
+
+def _profit_months_between(start_date, end_date):
+    result = []
+    cursor = start_date.replace(day=1)
+    end_month = end_date.replace(day=1)
+    while cursor <= end_month:
+        result.append(cursor.strftime("%Y-%m"))
+        if cursor.month == 12:
+            cursor = cursor.replace(year=cursor.year + 1, month=1)
+        else:
+            cursor = cursor.replace(month=cursor.month + 1)
+    return result
 
 
 def _profit_date_bounds():
@@ -3540,7 +3631,7 @@ def _profit_date_bounds():
     return row.get("min_date"), row.get("max_date")
 
 
-def _profit_rows(start_date, end_date, rmb_rate, payment_sell_rate, purchase_sell_rate):
+def _profit_rows(start_date, end_date, rates_by_month):
     conn = get_db()
     try:
         with conn.cursor() as cursor:
@@ -3560,25 +3651,38 @@ def _profit_rows(start_date, end_date, rmb_rate, payment_sell_rate, purchase_sel
     finally:
         conn.close()
 
-    rr = _profit_decimal(rmb_rate)
-    pay_rate = _profit_decimal(payment_sell_rate)
-    buy_rate = _profit_decimal(purchase_sell_rate)
     result = []
     for row in rows:
         amount = _profit_decimal(row.get("amount_rmb"))
-        fee = _profit_decimal(row.get("service_fee"))
+        fee = _profit_decimal(row.get("service_fee")).quantize(Decimal("0.01"))
         weight = _profit_decimal(row.get("weight_kg"))
+        order_time = row.get("order_time")
+        month_key = order_time.strftime("%Y-%m") if order_time else ""
+        rate_row = rates_by_month.get(month_key)
         is_payment = str(row.get("customer_name") or "").strip() == "代付"
-        sell_rate = pay_rate if is_payment else buy_rate
-        rate_profit = (amount * (sell_rate - rr)).quantize(Decimal("0.01"))
-        fee = fee.quantize(Decimal("0.01"))
-        total_profit = (rate_profit + fee).quantize(Decimal("0.01"))
+
+        rmb_rate = None
+        sell_rate = None
+        rate_profit = None
+        total_profit = None
+        if rate_row:
+            rmb_rate = _profit_decimal(rate_row.get("rmb_rate"))
+            sell_rate = _profit_decimal(
+                rate_row.get("payment_sell_rate") if is_payment
+                else rate_row.get("purchase_sell_rate")
+            )
+            rate_profit = (amount * (sell_rate - rmb_rate)).quantize(Decimal("0.01"))
+            total_profit = (rate_profit + fee).quantize(Decimal("0.01"))
+
         item = dict(row)
         item.update({
+            "rate_month": month_key,
+            "rate_missing": rate_row is None,
             "order_type": "代付" if is_payment else "代購",
             "amount_rmb_num": amount,
             "service_fee_num": fee,
             "weight_num": weight,
+            "rmb_rate_num": rmb_rate,
             "sell_rate_num": sell_rate,
             "rate_profit_num": rate_profit,
             "total_profit_num": total_profit,
@@ -3587,7 +3691,7 @@ def _profit_rows(start_date, end_date, rmb_rate, payment_sell_rate, purchase_sel
     return result
 
 
-def _profit_context(start_date="", end_date="", rmb_rate="0", payment_sell_rate="0", purchase_sell_rate="0"):
+def _profit_context(start_date="", end_date="", rate_month="", message="", error=""):
     taiwan_today = datetime.now(ZoneInfo("Asia/Taipei")).date()
     min_date, max_date = _profit_date_bounds()
     min_date = min_date or taiwan_today
@@ -3604,37 +3708,52 @@ def _profit_context(start_date="", end_date="", rmb_rate="0", payment_sell_rate=
     if start > end:
         start, end = end, start
 
-    rr = _profit_decimal(rmb_rate)
-    pay = _profit_decimal(payment_sell_rate)
-    buy = _profit_decimal(purchase_sell_rate)
-    rows = _profit_rows(start, end, rr, pay, buy)
-    payment_rows = [r for r in rows if r["order_type"] == "代付"]
-    purchase_rows = [r for r in rows if r["order_type"] == "代購"]
+    needed_months = _profit_months_between(start, end)
+    rates_by_month = _profit_rates_for_months(needed_months)
+    rows = _profit_rows(start, end, rates_by_month)
+    months_with_orders = sorted({r["rate_month"] for r in rows if r.get("rate_month")})
+    missing_months = [m for m in months_with_orders if m not in rates_by_month]
+    can_calculate = not missing_months
 
-    rate_profit = sum((r["rate_profit_num"] for r in rows), Decimal("0"))
+    completed_rows = [r for r in rows if not r["rate_missing"]]
+    payment_rows_complete = [r for r in completed_rows if r["order_type"] == "代付"]
+    purchase_rows_complete = [r for r in completed_rows if r["order_type"] == "代購"]
+
+    rate_profit = sum((r["rate_profit_num"] for r in completed_rows), Decimal("0"))
     service_fee = sum((r["service_fee_num"] for r in rows), Decimal("0"))
-    total_profit = sum((r["total_profit_num"] for r in rows), Decimal("0"))
-    payment_profit = sum((r["total_profit_num"] for r in payment_rows), Decimal("0"))
-    purchase_profit = sum((r["total_profit_num"] for r in purchase_rows), Decimal("0"))
+    total_profit = sum((r["total_profit_num"] for r in completed_rows), Decimal("0"))
+    payment_profit = sum((r["total_profit_num"] for r in payment_rows_complete), Decimal("0"))
+    purchase_profit = sum((r["total_profit_num"] for r in purchase_rows_complete), Decimal("0"))
+
+    history = _profit_rate_history()
+    history_map = {str(r["rate_month"]): r for r in history}
+    chosen_month = _profit_valid_month(rate_month, taiwan_today.strftime("%Y-%m"))
+    chosen_rate = history_map.get(chosen_month)
 
     return {
         "rows": rows[:500],
+        "all_rows": rows,
         "total_count": len(rows),
         "has_more": len(rows) > 500,
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "min_date": min_date.isoformat(),
         "max_date": max_date.isoformat(),
-        "rmb_rate": str(rr),
-        "payment_sell_rate": str(pay),
-        "purchase_sell_rate": str(buy),
         "rate_profit": float(rate_profit),
         "service_fee": float(service_fee),
         "total_profit": float(total_profit),
-        "payment_count": len(payment_rows),
-        "purchase_count": len(purchase_rows),
+        "payment_count": len([r for r in rows if r["order_type"] == "代付"]),
+        "purchase_count": len([r for r in rows if r["order_type"] == "代購"]),
         "payment_profit": float(payment_profit),
         "purchase_profit": float(purchase_profit),
+        "can_calculate": can_calculate,
+        "missing_months": missing_months,
+        "used_months": months_with_orders,
+        "rate_history": history,
+        "rate_month": chosen_month,
+        "selected_rate": chosen_rate,
+        "message": str(message or ""),
+        "error": str(error or ""),
     }
 
 
@@ -3643,13 +3762,79 @@ def profit_page(
     request: Request,
     start_date: str = "",
     end_date: str = "",
-    rmb_rate: str = "0",
-    payment_sell_rate: str = "0",
-    purchase_sell_rate: str = "0",
+    rate_month: str = "",
+    message: str = "",
+    error: str = "",
     admin: str = Depends(verify_admin),
 ):
-    context = _profit_context(start_date, end_date, rmb_rate, payment_sell_rate, purchase_sell_rate)
+    context = _profit_context(start_date, end_date, rate_month, message, error)
     return templates.TemplateResponse(request=request, name="profit.html", context=context)
+
+
+@app.post("/profit/rates/save")
+def profit_rate_save(
+    request: Request,
+    rate_month: str = Form(""),
+    rmb_rate: str = Form(""),
+    payment_sell_rate: str = Form(""),
+    purchase_sell_rate: str = Form(""),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    month_key = _profit_valid_month(rate_month)
+    if not month_key:
+        raise HTTPException(status_code=422, detail="月份格式不正確")
+
+    values = {
+        "人民幣匯率": _profit_decimal(rmb_rate, "-1"),
+        "代付定價匯率": _profit_decimal(payment_sell_rate, "-1"),
+        "代購定價匯率": _profit_decimal(purchase_sell_rate, "-1"),
+    }
+    if any(v <= 0 for v in values.values()):
+        raise HTTPException(status_code=422, detail="三個匯率都必須大於 0")
+    if any(v > Decimal("20") for v in values.values()):
+        raise HTTPException(status_code=422, detail="匯率數值看起來不合理，請確認後再儲存")
+
+    ensure_profit_monthly_rates_table()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO profit_monthly_rates
+                    (rate_month, rmb_rate, payment_sell_rate, purchase_sell_rate, updated_by)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    rmb_rate = VALUES(rmb_rate),
+                    payment_sell_rate = VALUES(payment_sell_rate),
+                    purchase_sell_rate = VALUES(purchase_sell_rate),
+                    updated_by = VALUES(updated_by),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    month_key,
+                    values["人民幣匯率"],
+                    values["代付定價匯率"],
+                    values["代購定價匯率"],
+                    admin,
+                ),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    qs = (
+        f"rate_month={quote(month_key)}"
+        f"&start_date={quote(str(start_date or ''))}"
+        f"&end_date={quote(str(end_date or ''))}"
+        f"&message={quote(month_key + ' 匯率設定已儲存。')}"
+    )
+    return RedirectResponse(url=f"/profit?{qs}", status_code=303)
 
 
 @app.post("/profit/export")
@@ -3657,21 +3842,22 @@ def profit_export(
     request: Request,
     start_date: str = Form(""),
     end_date: str = Form(""),
-    rmb_rate: str = Form("0"),
-    payment_sell_rate: str = Form("0"),
-    purchase_sell_rate: str = Form("0"),
+    rate_month: str = Form(""),
     admin: str = Depends(verify_admin),
 ):
     _check_same_origin(request)
-    context = _profit_context(start_date, end_date, rmb_rate, payment_sell_rate, purchase_sell_rate)
-    rows = _profit_rows(
-        datetime.strptime(context["start_date"], "%Y-%m-%d").date(),
-        datetime.strptime(context["end_date"], "%Y-%m-%d").date(),
-        context["rmb_rate"], context["payment_sell_rate"], context["purchase_sell_rate"],
-    )
+    context = _profit_context(start_date, end_date, rate_month)
+    if context["missing_months"]:
+        context["error"] = "請先設定以下月份的匯率，再匯出：" + "、".join(context["missing_months"])
+        return templates.TemplateResponse(request=request, name="profit.html", context=context, status_code=422)
+
+    rows = context["all_rows"]
+    rate_records = _profit_rates_for_months(context["used_months"])
     data = make_profit_xlsx(
-        rows, context["start_date"], context["end_date"],
-        context["rmb_rate"], context["payment_sell_rate"], context["purchase_sell_rate"],
+        rows,
+        context["start_date"],
+        context["end_date"],
+        rate_records,
     )
     filename = f"代購利潤報表_{context['start_date'].replace('-', '')}_{context['end_date'].replace('-', '')}.xlsx"
     return Response(
