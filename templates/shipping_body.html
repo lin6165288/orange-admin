@@ -28,12 +28,24 @@
   <div class="ship-metric"><span>客戶數</span><strong>{{ groups|length }} <small>位</small></strong></div>
   <div class="ship-metric ship-fee-metric"><span>本頁總國際運費（估算）</span><strong>NT$ {{ '%.0f'|format(total_fee) }}</strong></div>
 </section>
+<section class="ship-card ship-export-date-card">
+  <div class="ship-header">
+    <div>
+      <h2>📅 Excel 匯出設定</h2>
+      <p class="ship-muted">匯出賣貨便統整表或運回明細表前，先選擇本次運回日期。兩種檔案會共用這個日期。</p>
+    </div>
+    <label class="ship-date-field">
+      <span>運回日期</span>
+      <input id="ship-return-date" type="date" required>
+    </label>
+  </div>
+</section>
 {% if has_more %}<div class="ship-msg ship-warning">符合條件的訂單超過 500 筆，目前只顯示前 500 筆；上方重量與國際運費僅計算「目前顯示」的訂單，不代表所有符合條件訂單的總額。請用姓名分批操作。</div>{% endif %}
 {% if groups %}
 <details class="ship-card ship-summary" open>
   <summary>📋 各客戶包裹與國際運費（{{ groups|length }} 位）</summary>
   <p class="ship-muted ship-fee-hint">每位客戶分開計算：純集運（平台＝集運）合併重量後每 0.5 kg 進位、最低 1 kg，NT$90/kg；代購（其他平台）合併重量後每 0.5 kg 進位、最低 0.5 kg，NT$70/kg。兩類分別計費再相加。重量尚未登記（0 kg）的類別暫不估價，並非免運費。</p>
-  <form id="ship-customer-export" action="/shipping/export" method="post" target="_blank" onsubmit="return shipCheckCustomers(this)">
+  <form id="ship-customer-export" action="/shipping/export" method="post" target="_blank" onsubmit="return shipPrepareCustomerExport(this)">
     <input type="hidden" name="mode" value="{{ mode }}">
     <input type="hidden" name="customer" value="{{ customer }}">
     {% if hide_delayed %}<input type="hidden" name="hide_delayed" value="1">{% endif %}
@@ -41,11 +53,11 @@
     <div class="ship-export-toolbar">
       <label class="ship-select-all"><input type="checkbox" onchange="this.closest('form').querySelectorAll('input[name=selected_customers]').forEach(x => x.checked = this.checked)"> 全選本頁客戶</label>
       <div class="ship-export-buttons">
-        <button type="submit" name="export_kind" value="customer_summary" class="ship-export-btn">📥 匯出勾選客戶統整 Excel</button>
-        <button type="submit" name="export_kind" value="customer_details" class="ship-export-btn">📥 匯出勾選客戶訂單明細 Excel</button>
+        <button type="submit" name="export_kind" value="customer_summary" class="ship-export-btn">📥 匯出賣貨便統整表</button>
+        <button type="submit" name="export_kind" value="customer_details" class="ship-export-btn">📥 匯出勾選客戶明細表</button>
       </div>
     </div>
-    <p class="ship-muted">先勾選客戶再匯出。明細檔包含「訂單明細」及「客戶運費統整」兩張工作表；只匯出目前頁面的未運回包裹。</p>
+    <p class="ship-muted">先勾選客戶再匯出。賣貨便統整表會沿用原本的巨集範本：商品名稱只填第一格、規格＝客戶姓名、數量固定 1、價格＝該客戶本批國際運費。明細表只保留客戶姓名、下單順序（留白自行填）、運回日期、包裹總數與單號後四碼；重複物流單號只算 1 件。</p>
   <div class="ship-fee-table-wrap"><table class="ship-fee-table">
   <thead><tr><th>選取</th><th>客戶</th><th>未運回件數 / 實重</th><th>純集運（件 / 實重 → 計費重 / 運費）</th><th>代購（件 / 實重 → 計費重 / 運費）</th><th>合計國際運費</th></tr></thead>
   <tbody>{% for group in groups %}
@@ -97,11 +109,11 @@
     </tr>
     {% endfor %}
     </tbody></table></div>
-    <p class="ship-muted">匯出勾選訂單的運費統整僅按「這次選取的訂單」重新合重計費，不等於客戶所有包裹的完整運費。「標記已運回」只允許已到貨、未延後的訂單。</p>
+    <p class="ship-muted">匯出勾選訂單明細時，同一客戶的重複物流單號只列 1 件；「下單順序」欄位會留白供你自行填寫。「標記已運回」只允許已到貨、未延後的訂單。</p>
     <div class="ship-footer">
       <label class="ship-select-all"><input type="checkbox" onchange="this.closest('form').querySelectorAll('input[name=selected_order_ids]').forEach(x => x.checked = this.checked)"> 全選本頁（最多 100 筆可送出）</label>
       <div class="ship-actions">
-        <button type="button" class="ship-export-btn" onclick="shipExportOrders()">📥 匯出勾選訂單 Excel</button>
+        <button type="button" class="ship-export-btn" onclick="shipExportOrders()">📥 匯出勾選訂單明細表</button>
         <select name="action" required aria-label="批次操作">
         <option value="">選擇批次操作</option>
         {% for action_key,action_name in actions.items() %}<option value="{{ action_key }}">{{ action_name }}</option>{% endfor %}
@@ -113,12 +125,30 @@
 {% endif %}
 
 <script>
-function shipCheckCustomers(form) {
+function shipAttachReturnDate(form) {
+  const dateInput = document.getElementById('ship-return-date');
+  const value = dateInput ? dateInput.value : '';
+  if (!value) {
+    alert('請先選擇本次運回日期。');
+    if (dateInput) dateInput.focus();
+    return false;
+  }
+  let hidden = form.querySelector('input[name="return_date"]');
+  if (!hidden) {
+    hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'return_date';
+    form.appendChild(hidden);
+  }
+  hidden.value = value;
+  return true;
+}
+function shipPrepareCustomerExport(form) {
   if (!form.querySelector('input[name="selected_customers"]:checked')) {
     alert('請先勾選至少一位客戶。');
     return false;
   }
-  return true;
+  return shipAttachReturnDate(form);
 }
 function shipExportOrders() {
   const selected = [...document.querySelectorAll('#ship-action-form input[name="selected_order_ids"]:checked')];
@@ -126,6 +156,7 @@ function shipExportOrders() {
   const form = document.getElementById('ship-order-export');
   const holder = document.getElementById('ship-export-selected');
   if (!form || !holder) return;
+  if (!shipAttachReturnDate(form)) return;
   holder.replaceChildren();
   for (const item of selected) {
     const hidden = document.createElement('input');
