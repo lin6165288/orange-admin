@@ -2752,3 +2752,66 @@ body {
     .member-search-actions > * { flex: 1; }
     .member-summary-grid, .member-profile-grid, .member-stat-strip { grid-template-columns: 1fr; }
 }
+
+
+/* ======================================================
+   Dashboard live metrics + icon consistency
+====================================================== */
+.dashboard-card-link {
+    position: relative;
+    color: inherit;
+    text-decoration: none;
+    min-width: 0;
+}
+.dashboard-card-link:hover {
+    color: inherit;
+    border-color: #f2d8b8;
+    box-shadow: 0 7px 22px rgba(0, 0, 0, 0.055);
+    transform: translateY(-1px);
+}
+.dashboard-card-copy { min-width: 0; flex: 1; }
+.card-value small {
+    font-size: 13px;
+    color: #999;
+    font-weight: 500;
+}
+.card-note {
+    margin-top: 5px;
+    color: #aaa;
+    font-size: 12px;
+}
+.dashboard-card-arrow {
+    color: #c8c8c8;
+    font-size: 15px;
+    margin-left: auto;
+}
+.dashboard-card-link:hover .dashboard-card-arrow { color: #f08300; }
+
+/* 自動將舊頁面開頭 emoji 換成線條 icon 後使用 */
+.auto-line-icon {
+    display: inline-block;
+    margin-right: .48em;
+    font-size: .95em;
+    line-height: 1;
+    vertical-align: -0.05em;
+}
+button .auto-line-icon,
+a .auto-line-icon,
+summary .auto-line-icon { margin-right: .42em; }
+
+/* 標題 icon 統一為同一尺寸與橘色細線語彙 */
+.page-title-icon,
+.section-title-icon,
+.card-icon,
+.brand-mark {
+    box-shadow: none;
+}
+.page-title-icon i,
+.section-title-icon i,
+.card-icon i,
+.brand-mark i,
+.menu-icon i { stroke-width: 1; }
+
+@media (max-width: 768px) {
+    .dashboard-card-arrow { display: none; }
+}
