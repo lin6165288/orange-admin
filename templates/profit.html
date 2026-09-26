@@ -4,48 +4,93 @@
 <div class="page-header">
   <div>
     <h1><span class="page-title-icon"><i class="bi bi-graph-up"></i></span>利潤報表</h1>
-    <p>依日期與匯率即時計算匯率價差、手續費收入及總利潤。</p>
+    <p>每個月份保存一組匯率；跨月份查詢時，會依每筆訂單的下單月份自動套用對應匯率。</p>
   </div>
 </div>
 
+{% if message %}<div class="profit-message success"><i class="bi bi-check2-circle"></i><span>{{ message }}</span></div>{% endif %}
+{% if error %}<div class="profit-message error"><i class="bi bi-exclamation-circle"></i><span>{{ error }}</span></div>{% endif %}
+
+<section class="profit-rate-card">
+  <div class="profit-rate-head">
+    <div>
+      <h2><span class="section-title-icon"><i class="bi bi-currency-exchange"></i></span>每月匯率設定</h2>
+      <p>同一月份之後可以直接修改並覆蓋，報表會立即改用最新設定重新計算。</p>
+    </div>
+  </div>
+
+  <form method="get" action="/profit" class="profit-month-loader">
+    <input type="hidden" name="start_date" value="{{ start_date }}">
+    <input type="hidden" name="end_date" value="{{ end_date }}">
+    <label>要編輯的月份
+      <input type="month" name="rate_month" value="{{ rate_month }}" onchange="this.form.submit()">
+    </label>
+  </form>
+
+  <form method="post" action="/profit/rates/save" class="profit-rate-form">
+    <input type="hidden" name="rate_month" value="{{ rate_month }}">
+    <input type="hidden" name="start_date" value="{{ start_date }}">
+    <input type="hidden" name="end_date" value="{{ end_date }}">
+    <div class="profit-rate-grid">
+      <div class="search-field"><label>人民幣成本匯率</label><input type="number" name="rmb_rate" min="0.0001" step="0.0001" required value="{{ selected_rate.rmb_rate if selected_rate else '' }}" placeholder="例如 4.4200"></div>
+      <div class="search-field"><label>代付定價匯率</label><input type="number" name="payment_sell_rate" min="0.0001" step="0.0001" required value="{{ selected_rate.payment_sell_rate if selected_rate else '' }}" placeholder="例如 4.5500"></div>
+      <div class="search-field"><label>代購定價匯率</label><input type="number" name="purchase_sell_rate" min="0.0001" step="0.0001" required value="{{ selected_rate.purchase_sell_rate if selected_rate else '' }}" placeholder="例如 4.6000"></div>
+      <div class="profit-rate-save"><button type="submit" class="search-button"><i class="bi bi-floppy"></i><span>儲存 {{ rate_month }} 匯率</span></button></div>
+    </div>
+  </form>
+
+  {% if rate_history %}
+  <details class="profit-rate-history">
+    <summary><i class="bi bi-clock-history"></i><span>查看已儲存的月份匯率</span></summary>
+    <div class="profit-rate-history-wrap"><table><thead><tr><th>月份</th><th>人民幣成本匯率</th><th>代付定價匯率</th><th>代購定價匯率</th><th>最後更新</th></tr></thead><tbody>
+    {% for item in rate_history %}<tr><td><a href="/profit?rate_month={{ item.rate_month }}&start_date={{ start_date }}&end_date={{ end_date }}">{{ item.rate_month }}</a></td><td>{{ item.rmb_rate }}</td><td>{{ item.payment_sell_rate }}</td><td>{{ item.purchase_sell_rate }}</td><td>{{ item.updated_at }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </details>
+  {% endif %}
+</section>
+
 <section class="profit-filter-card">
   <form method="get" action="/profit" class="profit-filter-form">
-    <div class="profit-filter-grid">
-      <div class="search-field"><label>人民幣匯率</label><input type="number" name="rmb_rate" min="0" step="0.01" value="{{ rmb_rate }}"></div>
-      <div class="search-field"><label>代付定價匯率</label><input type="number" name="payment_sell_rate" min="0" step="0.01" value="{{ payment_sell_rate }}"></div>
-      <div class="search-field"><label>代購定價匯率</label><input type="number" name="purchase_sell_rate" min="0" step="0.01" value="{{ purchase_sell_rate }}"></div>
+    <input type="hidden" name="rate_month" value="{{ rate_month }}">
+    <div class="profit-report-filter-grid">
       <div class="search-field"><label>起始日期</label><input type="date" name="start_date" min="{{ min_date }}" max="{{ max_date }}" value="{{ start_date }}"></div>
       <div class="search-field"><label>結束日期</label><input type="date" name="end_date" min="{{ min_date }}" max="{{ max_date }}" value="{{ end_date }}"></div>
       <div class="profit-filter-action"><button type="submit" class="search-button"><i class="bi bi-calculator"></i><span>重新計算</span></button></div>
     </div>
-    <p class="profit-hint">客戶姓名完全等於「代付」時使用代付定價匯率，其餘訂單使用代購定價匯率；計算方式沿用舊版後台。</p>
+    <p class="profit-hint">客戶姓名完全等於「代付」時使用該月的代付定價匯率；其他訂單使用該月的代購定價匯率。</p>
   </form>
 </section>
 
+{% if missing_months %}
+<div class="profit-missing-rates">
+  <div><i class="bi bi-exclamation-triangle"></i><strong>這個日期區間有尚未設定匯率的月份</strong></div>
+  <p>請先設定：{% for month in missing_months %}<a href="/profit?rate_month={{ month }}&start_date={{ start_date }}&end_date={{ end_date }}">{{ month }}</a>{% if not loop.last %}、{% endif %}{% endfor %}。未補齊前不會顯示完整總利潤，也不能匯出，以免算錯。</p>
+</div>
+{% endif %}
+
 <section class="profit-kpis">
-  <div class="profit-kpi"><span>匯率價差利潤</span><strong>NT$ {{ '{:,.2f}'.format(rate_profit) }}</strong></div>
+  <div class="profit-kpi"><span>匯率價差利潤</span><strong>{% if can_calculate %}NT$ {{ '{:,.2f}'.format(rate_profit) }}{% else %}待補匯率{% endif %}</strong></div>
   <div class="profit-kpi"><span>手續費收入</span><strong>NT$ {{ '{:,.2f}'.format(service_fee) }}</strong></div>
-  <div class="profit-kpi profit-kpi-main"><span>總利潤</span><strong>NT$ {{ '{:,.2f}'.format(total_profit) }}</strong></div>
+  <div class="profit-kpi profit-kpi-main"><span>總利潤</span><strong>{% if can_calculate %}NT$ {{ '{:,.2f}'.format(total_profit) }}{% else %}待補匯率{% endif %}</strong></div>
 </section>
 
 <section class="profit-type-grid">
-  <div class="profit-type-card"><div><span class="profit-type-icon"><i class="bi bi-arrow-left-right"></i></span><span>代付訂單</span></div><strong>{{ payment_count }} 筆</strong><small>總利潤 NT$ {{ '{:,.2f}'.format(payment_profit) }}</small></div>
-  <div class="profit-type-card"><div><span class="profit-type-icon"><i class="bi bi-bag"></i></span><span>代購訂單</span></div><strong>{{ purchase_count }} 筆</strong><small>總利潤 NT$ {{ '{:,.2f}'.format(purchase_profit) }}</small></div>
+  <div class="profit-type-card"><div><span class="profit-type-icon"><i class="bi bi-arrow-left-right"></i></span><span>代付訂單</span></div><strong>{{ payment_count }} 筆</strong><small>{% if can_calculate %}總利潤 NT$ {{ '{:,.2f}'.format(payment_profit) }}{% else %}部分月份尚未設定匯率{% endif %}</small></div>
+  <div class="profit-type-card"><div><span class="profit-type-icon"><i class="bi bi-bag"></i></span><span>代購訂單</span></div><strong>{{ purchase_count }} 筆</strong><small>{% if can_calculate %}總利潤 NT$ {{ '{:,.2f}'.format(purchase_profit) }}{% else %}部分月份尚未設定匯率{% endif %}</small></div>
 </section>
 
 <section class="profit-table-card">
   <div class="profit-table-head">
     <div><h2>訂單明細</h2><p>{{ start_date }} ～ {{ end_date }}，共 {{ total_count }} 筆</p></div>
     <form method="post" action="/profit/export">
-      <input type="hidden" name="start_date" value="{{ start_date }}"><input type="hidden" name="end_date" value="{{ end_date }}">
-      <input type="hidden" name="rmb_rate" value="{{ rmb_rate }}"><input type="hidden" name="payment_sell_rate" value="{{ payment_sell_rate }}"><input type="hidden" name="purchase_sell_rate" value="{{ purchase_sell_rate }}">
-      <button type="submit" class="profit-export-button"><i class="bi bi-download"></i><span>匯出 Excel</span></button>
+      <input type="hidden" name="start_date" value="{{ start_date }}"><input type="hidden" name="end_date" value="{{ end_date }}"><input type="hidden" name="rate_month" value="{{ rate_month }}">
+      <button type="submit" class="profit-export-button" {% if not can_calculate %}disabled title="請先補齊月份匯率"{% endif %}><i class="bi bi-download"></i><span>匯出 Excel</span></button>
     </form>
   </div>
   {% if has_more %}<div class="profit-warning">明細畫面只顯示最近 500 筆，但上方統計與 Excel 匯出仍包含此日期區間的全部訂單。</div>{% endif %}
   {% if rows %}
-  <div class="profit-table-wrap"><table class="profit-table"><thead><tr><th>訂單</th><th>日期</th><th>姓名</th><th>類型</th><th>平台</th><th>人民幣</th><th>適用匯率</th><th>匯率價差</th><th>手續費</th><th>總利潤</th></tr></thead><tbody>
-  {% for row in rows %}<tr><td>#{{ row.order_id }}</td><td>{{ row.order_time or '—' }}</td><td class="profit-name">{{ row.customer_name or '—' }}</td><td><span class="profit-type-pill {{ 'payment' if row.order_type == '代付' else 'purchase' }}">{{ row.order_type }}</span></td><td>{{ row.platform or '—' }}</td><td>¥{{ '%.2f'|format(row.amount_rmb_num) }}</td><td>{{ row.sell_rate_num }}</td><td>NT$ {{ '%.2f'|format(row.rate_profit_num) }}</td><td>NT$ {{ '%.2f'|format(row.service_fee_num) }}</td><td class="profit-total-cell">NT$ {{ '%.2f'|format(row.total_profit_num) }}</td></tr>{% endfor %}
+  <div class="profit-table-wrap"><table class="profit-table"><thead><tr><th>訂單</th><th>日期</th><th>姓名</th><th>月份</th><th>類型</th><th>平台</th><th>人民幣</th><th>成本匯率</th><th>適用定價匯率</th><th>匯率價差</th><th>手續費</th><th>總利潤</th></tr></thead><tbody>
+  {% for row in rows %}<tr class="{% if row.rate_missing %}profit-rate-missing-row{% endif %}"><td>#{{ row.order_id }}</td><td>{{ row.order_time or '—' }}</td><td class="profit-name">{{ row.customer_name or '—' }}</td><td>{{ row.rate_month }}</td><td><span class="profit-type-pill {{ 'payment' if row.order_type == '代付' else 'purchase' }}">{{ row.order_type }}</span></td><td>{{ row.platform or '—' }}</td><td>¥{{ '%.2f'|format(row.amount_rmb_num) }}</td><td>{% if row.rate_missing %}<span class="profit-missing-pill">未設定</span>{% else %}{{ row.rmb_rate_num }}{% endif %}</td><td>{% if row.rate_missing %}—{% else %}{{ row.sell_rate_num }}{% endif %}</td><td>{% if row.rate_missing %}—{% else %}NT$ {{ '%.2f'|format(row.rate_profit_num) }}{% endif %}</td><td>NT$ {{ '%.2f'|format(row.service_fee_num) }}</td><td class="profit-total-cell">{% if row.rate_missing %}—{% else %}NT$ {{ '%.2f'|format(row.total_profit_num) }}{% endif %}</td></tr>{% endfor %}
   </tbody></table></div>
   {% else %}<div class="empty-state">此日期區間目前沒有訂單資料。</div>{% endif %}
 </section>
