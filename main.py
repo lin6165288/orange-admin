@@ -3092,3 +3092,341 @@ def shipping_requests_apply(
     customer_filter = str(customer_filter or "").strip()
     qs = f"status={quote(target_status)}&customer={quote(customer_filter)}&message={quote(f'已將 {changed} 筆申請標記為{label}。')}"
     return RedirectResponse(url=f"/shipping/requests?{qs}", status_code=303)
+
+
+# =========================================================
+# 會員管理：沿用舊 Streamlit 的會員等級 / 備註 / LINE 綁定資訊
+# =========================================================
+
+MEMBER_LEVELS = ("一般會員", "VIP1", "VIP2", "VIP3")
+
+
+def ensure_members_table_admin():
+    """確保會員表與舊版需要的欄位存在；不建立餘額 / 儲值欄位。"""
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS members (
+                    member_id INT AUTO_INCREMENT PRIMARY KEY,
+                    customer_name VARCHAR(255) NOT NULL,
+                    member_level VARCHAR(50) NOT NULL DEFAULT '一般會員',
+                    note TEXT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    line_user_id VARCHAR(100) NULL,
+                    line_name VARCHAR(100) NULL,
+                    UNIQUE KEY uk_customer_name (customer_name)
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute("SHOW COLUMNS FROM members")
+            existing = {row["Field"] for row in cursor.fetchall()}
+            additions = {
+                "member_level": "VARCHAR(50) NOT NULL DEFAULT '一般會員'",
+                "note": "TEXT NULL",
+                "created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+                "line_user_id": "VARCHAR(100) NULL",
+                "line_name": "VARCHAR(100) NULL",
+            }
+            for name, ddl in additions.items():
+                if name not in existing:
+                    cursor.execute(f"ALTER TABLE members ADD COLUMN {name} {ddl}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def sync_members_from_orders_admin():
+    """將 orders 中尚未存在的客戶同步進 members；不改既有會員資料。"""
+    ensure_members_table_admin()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT DISTINCT customer_name
+                FROM orders
+                WHERE customer_name IS NOT NULL
+                  AND TRIM(customer_name) <> ''
+                """
+            )
+            names = [row["customer_name"] for row in cursor.fetchall() if row.get("customer_name")]
+            if names:
+                cursor.executemany(
+                    "INSERT IGNORE INTO members (customer_name) VALUES (%s)",
+                    [(name,) for name in names],
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def member_order_stats(names):
+    """避免 members / orders customer_name 不同 collation 的 JOIN 問題，以 Python 合併統計。"""
+    names = [str(x) for x in names if x]
+    if not names:
+        return {}
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            result = {}
+            # 依批次查詢，避免 IN 過長。
+            for start in range(0, len(names), 200):
+                batch = names[start:start + 200]
+                placeholders = ",".join(["%s"] * len(batch))
+                cursor.execute(
+                    f"""
+                    SELECT
+                        customer_name,
+                        COUNT(*) AS order_count,
+                        SUM(CASE WHEN COALESCE(is_returned,0)=0 THEN 1 ELSE 0 END) AS unreturned_count,
+                        COALESCE(SUM(weight_kg),0) AS total_weight,
+                        MAX(order_time) AS last_order_date
+                    FROM orders
+                    WHERE customer_name IN ({placeholders})
+                    GROUP BY customer_name
+                    """,
+                    batch,
+                )
+                for row in cursor.fetchall():
+                    result[str(row["customer_name"])] = row
+            return result
+    finally:
+        conn.close()
+
+
+def member_rows(keyword="", level="all"):
+    sync_members_from_orders_admin()
+    keyword = str(keyword or "").strip()[:100]
+    level = str(level or "all")
+    if level not in ("all",) + MEMBER_LEVELS:
+        level = "all"
+
+    where = ["1=1"]
+    params = []
+    if keyword:
+        where.append("(customer_name LIKE %s OR COALESCE(line_name,'') LIKE %s)")
+        like = f"%{keyword}%"
+        params.extend([like, like])
+    if level != "all":
+        where.append("member_level = %s")
+        params.append(level)
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT member_id, customer_name, member_level, note,
+                       line_user_id, line_name, created_at, updated_at
+                FROM members
+                WHERE {' AND '.join(where)}
+                ORDER BY updated_at DESC, member_id DESC
+                LIMIT 500
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT member_level, COUNT(*) AS cnt
+                FROM members
+                GROUP BY member_level
+                """
+            )
+            counts = {row["member_level"]: int(row["cnt"] or 0) for row in cursor.fetchall()}
+    finally:
+        conn.close()
+
+    stats = member_order_stats([row.get("customer_name") for row in rows])
+    for row in rows:
+        st = stats.get(str(row.get("customer_name")), {})
+        row["order_count"] = int(st.get("order_count") or 0)
+        row["unreturned_count"] = int(st.get("unreturned_count") or 0)
+        row["total_weight_num"] = float(st.get("total_weight") or 0)
+        row["last_order_date"] = st.get("last_order_date")
+        if row.get("member_level") not in MEMBER_LEVELS:
+            row["member_level"] = "一般會員"
+    return rows, counts, keyword, level
+
+
+def fetch_member_admin(member_id: int):
+    ensure_members_table_admin()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT member_id, customer_name, member_level, note,
+                       line_user_id, line_name, created_at, updated_at
+                FROM members
+                WHERE member_id = %s
+                LIMIT 1
+                """,
+                (member_id,),
+            )
+            return cursor.fetchone()
+    finally:
+        conn.close()
+
+
+def member_detail_context(member_id: int):
+    member = fetch_member_admin(member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="找不到會員")
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT order_id, order_time, platform, tracking_number,
+                       amount_rmb, weight_kg, is_arrived, is_returned, order_status
+                FROM orders
+                WHERE customer_name = %s
+                ORDER BY order_time DESC, order_id DESC
+                LIMIT 50
+                """,
+                (member["customer_name"],),
+            )
+            orders = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS order_count,
+                       SUM(CASE WHEN COALESCE(is_returned,0)=0 THEN 1 ELSE 0 END) AS unreturned_count,
+                       COALESCE(SUM(weight_kg),0) AS total_weight,
+                       COALESCE(SUM(amount_rmb),0) AS total_rmb
+                FROM orders
+                WHERE customer_name = %s
+                """,
+                (member["customer_name"],),
+            )
+            stats = cursor.fetchone() or {}
+    finally:
+        conn.close()
+    stats["order_count"] = int(stats.get("order_count") or 0)
+    stats["unreturned_count"] = int(stats.get("unreturned_count") or 0)
+    stats["total_weight_num"] = float(stats.get("total_weight") or 0)
+    stats["total_rmb_num"] = float(stats.get("total_rmb") or 0)
+    return {"member": member, "orders": orders, "stats": stats, "member_levels": MEMBER_LEVELS}
+
+
+@app.get("/members")
+def members_page(
+    request: Request,
+    keyword: str = "",
+    level: str = "all",
+    admin: str = Depends(verify_admin),
+):
+    rows, counts, keyword, level = member_rows(keyword, level)
+    return templates.TemplateResponse(
+        request=request,
+        name="members.html",
+        context={
+            "members": rows,
+            "level_counts": counts,
+            "keyword": keyword,
+            "level": level,
+            "member_levels": MEMBER_LEVELS,
+        },
+    )
+
+
+@app.get("/members/search")
+def members_search(
+    request: Request,
+    keyword: str = "",
+    level: str = "all",
+    admin: str = Depends(verify_admin),
+):
+    rows, counts, keyword, level = member_rows(keyword, level)
+    return templates.TemplateResponse(
+        request=request,
+        name="members_results.html",
+        context={
+            "members": rows,
+            "level_counts": counts,
+            "keyword": keyword,
+            "level": level,
+            "member_levels": MEMBER_LEVELS,
+        },
+    )
+
+
+@app.get("/members/{member_id}/detail")
+def member_detail(
+    request: Request,
+    member_id: int,
+    admin: str = Depends(verify_admin),
+):
+    return templates.TemplateResponse(
+        request=request,
+        name="member_detail.html",
+        context=member_detail_context(member_id),
+    )
+
+
+@app.get("/members/{member_id}/edit")
+def member_edit_page(
+    request: Request,
+    member_id: int,
+    admin: str = Depends(verify_admin),
+):
+    context = member_detail_context(member_id)
+    return templates.TemplateResponse(request=request, name="member_edit.html", context=context)
+
+
+@app.post("/members/{member_id}/edit")
+def member_edit_save(
+    request: Request,
+    member_id: int,
+    member_level: str = Form("一般會員"),
+    note: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    if member_level not in MEMBER_LEVELS:
+        raise HTTPException(status_code=422, detail="會員等級不正確")
+    note_value = str(note or "").strip()
+    if len(note_value) > 65535:
+        raise HTTPException(status_code=422, detail="備註內容過長")
+
+    ensure_members_table_admin()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT member_id FROM members WHERE member_id = %s FOR UPDATE",
+                (member_id,),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="找不到會員")
+            cursor.execute(
+                """
+                UPDATE members
+                SET member_level = %s,
+                    note = %s
+                WHERE member_id = %s
+                """,
+                (member_level, note_value or None, member_id),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="member_detail.html",
+        context={**member_detail_context(member_id), "message": "會員資料已更新。"},
+    )
