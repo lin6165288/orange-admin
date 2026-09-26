@@ -7,7 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    <link rel="stylesheet" href="/static/style.css?v=19">
+    <link rel="stylesheet" href="/static/style.css?v=20">
 </head>
 <body>
 <div class="app">
@@ -68,5 +68,72 @@
         {% block content %}{% endblock %}
     </main>
 </div>
+
+<script>
+(function () {
+  const iconMap = new Map([
+    ['🔍', 'bi-search'], ['📦', 'bi-box-seam'], ['🚚', 'bi-truck'],
+    ['👤', 'bi-people'], ['📊', 'bi-graph-up'], ['💬', 'bi-chat-dots'],
+    ['🕘', 'bi-clock-history'], ['🧡', 'bi-heart'], ['📥', 'bi-download'],
+    ['📤', 'bi-upload'], ['📨', 'bi-envelope-paper'], ['📅', 'bi-calendar3'],
+    ['✅', 'bi-check2-circle'], ['❌', 'bi-x-circle'], ['✏️', 'bi-pencil'],
+    ['🗑', 'bi-trash3'], ['🧾', 'bi-receipt'], ['📋', 'bi-list-ul'],
+    ['💰', 'bi-cash-stack'], ['🧹', 'bi-eraser'], ['⚠️', 'bi-exclamation-triangle'],
+    ['📣', 'bi-megaphone'], ['⏰', 'bi-clock'], ['📮', 'bi-mailbox'],
+    ['⚙️', 'bi-gear'], ['🔄', 'bi-arrow-repeat'], ['💾', 'bi-floppy'],
+    ['➕', 'bi-plus-square'], ['＋', 'bi-plus-square'], ['🏠', 'bi-house'],
+    ['📈', 'bi-graph-up-arrow'], ['📉', 'bi-graph-down-arrow'], ['📁', 'bi-folder2-open']
+  ]);
+
+  function replaceLeadingEmoji(el) {
+    if (!el || el.dataset.lineIconProcessed === '1') return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const raw = node.nodeValue || '';
+      const trimmed = raw.trimStart();
+      for (const [emoji, iconClass] of iconMap.entries()) {
+        if (trimmed.startsWith(emoji)) {
+          const lead = raw.slice(0, raw.length - trimmed.length);
+          const rest = trimmed.slice(emoji.length).trimStart();
+          const frag = document.createDocumentFragment();
+          if (lead) frag.appendChild(document.createTextNode(lead));
+          const icon = document.createElement('i');
+          icon.className = `bi ${iconClass} auto-line-icon`;
+          icon.setAttribute('aria-hidden', 'true');
+          frag.appendChild(icon);
+          if (rest) frag.appendChild(document.createTextNode(rest));
+          node.parentNode.replaceChild(frag, node);
+          el.dataset.lineIconProcessed = '1';
+          return;
+        }
+      }
+    }
+    el.dataset.lineIconProcessed = '1';
+  }
+
+  function normalizeIcons(root) {
+    const selector = [
+      '.page-header h1', '.page-header h2', '.ship-card h2', '.ship-header h2',
+      'button', 'summary', '.ship-page-tab', '.member-orders-title',
+      '.audit-action', '.empty-state', '.detail-edit-button'
+    ].join(',');
+    if (root.matches && root.matches(selector)) replaceLeadingEmoji(root);
+    if (root.querySelectorAll) root.querySelectorAll(selector).forEach(replaceLeadingEmoji);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => normalizeIcons(document));
+  document.body.addEventListener('htmx:afterSwap', (event) => normalizeIcons(event.target));
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === 1) normalizeIcons(node);
+      });
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+})();
+</script>
+
 </body>
 </html>
