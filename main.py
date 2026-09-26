@@ -4189,3 +4189,294 @@ def frontend_delete_shipping_batch(
     if not deleted:
         return _frontend_redirect(error="找不到這筆船班。")
     return _frontend_redirect(message=f"船班 #{batch_id} 已刪除。")
+
+# =========================================================
+# 集運登記管理：沿用舊 Streamlit 前台登記 -> 建立集運訂單邏輯
+# =========================================================
+
+FORWARDING_STATUS_LABELS = {
+    "pending": "待處理",
+    "processed": "已處理",
+    "cancelled": "已取消",
+}
+
+
+def ensure_forwarding_register_table_admin():
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS customer_forwarding_registers (
+                    register_id INT AUTO_INCREMENT PRIMARY KEY,
+                    customer_name VARCHAR(255) NOT NULL,
+                    tracking_number VARCHAR(255) NOT NULL,
+                    item_name VARCHAR(255) NOT NULL,
+                    quantity INT NOT NULL DEFAULT 1,
+                    unit_price_rmb DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    remarks TEXT NULL,
+                    status ENUM('pending','processed','cancelled') NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_tracking_number (tracking_number)
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute("SHOW COLUMNS FROM customer_forwarding_registers")
+            existing = {row["Field"] for row in cursor.fetchall()}
+            additions = {
+                "quantity": "INT NOT NULL DEFAULT 1",
+                "unit_price_rmb": "DECIMAL(10,2) NOT NULL DEFAULT 0",
+                "remarks": "TEXT NULL",
+                "status": "ENUM('pending','processed','cancelled') NOT NULL DEFAULT 'pending'",
+                "created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+            }
+            for name, ddl in additions.items():
+                if name not in existing:
+                    cursor.execute(f"ALTER TABLE customer_forwarding_registers ADD COLUMN {name} {ddl}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def forwarding_register_rows(status="pending", keyword=""):
+    ensure_forwarding_register_table_admin()
+    status = str(status or "pending")
+    if status not in ("all", "pending", "processed", "cancelled"):
+        status = "pending"
+    keyword = str(keyword or "").strip()[:100]
+
+    where = ["1=1"]
+    params = []
+    if status != "all":
+        where.append("status = %s")
+        params.append(status)
+    if keyword:
+        like = f"%{keyword}%"
+        where.append(
+            "(customer_name LIKE %s OR tracking_number LIKE %s OR item_name LIKE %s OR COALESCE(remarks,'') LIKE %s)"
+        )
+        params.extend([like, like, like, like])
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT register_id, customer_name, tracking_number, item_name,
+                       quantity, unit_price_rmb, remarks, status, created_at, updated_at
+                FROM customer_forwarding_registers
+                WHERE {' AND '.join(where)}
+                ORDER BY created_at DESC, register_id DESC
+                LIMIT 500
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT status, COUNT(*) AS cnt
+                FROM customer_forwarding_registers
+                GROUP BY status
+                """
+            )
+            counts = {row["status"]: int(row["cnt"] or 0) for row in cursor.fetchall()}
+    finally:
+        conn.close()
+
+    for row in rows:
+        row["status_label"] = FORWARDING_STATUS_LABELS.get(row.get("status"), row.get("status") or "—")
+        row["quantity_num"] = int(row.get("quantity") or 0)
+        row["unit_price_num"] = float(row.get("unit_price_rmb") or 0)
+    return rows, counts, status, keyword
+
+
+def _forwarding_redirect(status_filter="pending", keyword="", message="", error=""):
+    parts = [f"status={quote(str(status_filter or 'pending'))}"]
+    if keyword:
+        parts.append("keyword=" + quote(str(keyword)))
+    if message:
+        parts.append("message=" + quote(str(message)))
+    if error:
+        parts.append("error=" + quote(str(error)))
+    return RedirectResponse(url="/forwarding-registers?" + "&".join(parts), status_code=303)
+
+
+@app.get("/forwarding-registers")
+def forwarding_registers_page(
+    request: Request,
+    status: str = "pending",
+    keyword: str = "",
+    message: str = "",
+    error: str = "",
+    admin: str = Depends(verify_admin),
+):
+    rows, counts, status, keyword = forwarding_register_rows(status, keyword)
+    return templates.TemplateResponse(
+        request=request,
+        name="forwarding_registers.html",
+        context={
+            "rows": rows,
+            "counts": counts,
+            "status": status,
+            "keyword": keyword,
+            "message": str(message or ""),
+            "error": str(error or ""),
+            "status_labels": FORWARDING_STATUS_LABELS,
+        },
+    )
+
+
+@app.post("/forwarding-registers/apply")
+def forwarding_registers_apply(
+    request: Request,
+    selected_register_ids: list[int] = Form([]),
+    action: str = Form(""),
+    status_filter: str = Form("pending"),
+    keyword_filter: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_forwarding_register_table_admin()
+    ids = []
+    seen = set()
+    for raw in selected_register_ids:
+        try:
+            rid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if rid > 0 and rid not in seen:
+            seen.add(rid)
+            ids.append(rid)
+    if not ids:
+        return _forwarding_redirect(status_filter, keyword_filter, error="請先勾選至少一筆集運登記。")
+    if len(ids) > 100:
+        return _forwarding_redirect(status_filter, keyword_filter, error="一次最多處理 100 筆集運登記。")
+    if action not in ("processed", "cancelled"):
+        return _forwarding_redirect(status_filter, keyword_filter, error="批次操作不正確。")
+
+    ensure_audit_storage()
+    conn = get_db()
+    created_count = 0
+    duplicate_count = 0
+    changed_count = 0
+    skipped_count = 0
+    invalid_count = 0
+    try:
+        with conn.cursor() as cursor:
+            for register_id in ids:
+                cursor.execute(
+                    """
+                    SELECT register_id, customer_name, tracking_number, item_name,
+                           quantity, unit_price_rmb, remarks, status
+                    FROM customer_forwarding_registers
+                    WHERE register_id = %s
+                    FOR UPDATE
+                    """,
+                    (register_id,),
+                )
+                row = cursor.fetchone()
+                if not row or row.get("status") != "pending":
+                    skipped_count += 1
+                    continue
+
+                if action == "cancelled":
+                    cursor.execute(
+                        "UPDATE customer_forwarding_registers SET status='cancelled' WHERE register_id=%s",
+                        (register_id,),
+                    )
+                    changed_count += 1
+                    continue
+
+                customer_name = str(row.get("customer_name") or "").strip()
+                tracking_number = str(row.get("tracking_number") or "").strip()
+                item_name = str(row.get("item_name") or "").strip()
+                remarks = str(row.get("remarks") or "").strip()
+                quantity = int(row.get("quantity") or 1)
+                unit_price = Decimal(str(row.get("unit_price_rmb") or 0))
+
+                if not customer_name or not tracking_number or not item_name:
+                    invalid_count += 1
+                    continue
+
+                cursor.execute(
+                    "SELECT order_id FROM orders WHERE tracking_number = %s LIMIT 1",
+                    (tracking_number,),
+                )
+                existing = cursor.fetchone()
+
+                cursor.execute(
+                    "UPDATE customer_forwarding_registers SET status='processed' WHERE register_id=%s",
+                    (register_id,),
+                )
+                changed_count += 1
+
+                if existing:
+                    duplicate_count += 1
+                    continue
+
+                auto_remarks = (
+                    f"前台集運登記｜內容物：{item_name}｜數量：{quantity}｜"
+                    f"單價：{format(unit_price, 'f')} RMB"
+                )
+                if remarks:
+                    auto_remarks += f"｜備註：{remarks}"
+
+                order_date = datetime.now(ZoneInfo("Asia/Taipei")).date()
+                cursor.execute(
+                    """
+                    INSERT INTO orders
+                    (order_time, customer_name, platform, tracking_number,
+                     amount_rmb, weight_kg, is_arrived, is_returned,
+                     service_fee, remarks)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        order_date,
+                        customer_name,
+                        "集運",
+                        tracking_number,
+                        Decimal("0"),
+                        Decimal("0"),
+                        0,
+                        0,
+                        Decimal("0"),
+                        auto_remarks,
+                    ),
+                )
+                new_order_id = int(cursor.lastrowid)
+                cursor.execute(
+                    "INSERT IGNORE INTO members (customer_name) VALUES (%s)",
+                    (customer_name,),
+                )
+                new_order = fetch_locked_order(cursor, new_order_id)
+                if not new_order:
+                    raise RuntimeError("集運登記建立訂單後無法讀取訂單，已取消交易")
+                write_audit_log(cursor, new_order_id, "CREATE", admin, None, new_order)
+                created_count += 1
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    if action == "cancelled":
+        msg = f"已取消 {changed_count} 筆集運登記。"
+        if skipped_count:
+            msg += f" 另有 {skipped_count} 筆因狀態已變更而略過。"
+        return _forwarding_redirect(status_filter, keyword_filter, message=msg)
+
+    msg = f"已處理 {changed_count} 筆集運登記，其中新增 {created_count} 筆集運訂單。"
+    if duplicate_count:
+        msg += f" {duplicate_count} 筆因 orders 已有相同快遞單號，未重複新增。"
+    if invalid_count:
+        msg += f" {invalid_count} 筆資料不完整，仍維持待處理。"
+    if skipped_count:
+        msg += f" {skipped_count} 筆因狀態已變更而略過。"
+    return _forwarding_redirect(status_filter, keyword_filter, message=msg)
+
