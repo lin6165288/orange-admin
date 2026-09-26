@@ -2294,3 +2294,48 @@ body {
 .ship-fee-table input[type=checkbox] {accent-color:#ed922e;width:17px;height:17px;}
 .ship-export-toolbar + .ship-muted {margin-top:10px;}
 @media(max-width:650px) {.ship-export-toolbar{align-items:stretch;flex-direction:column}.ship-export-buttons{flex-direction:column}.ship-export-btn{white-space:normal;width:100%}}
+
+/* ======================================================
+   Shipping export date
+====================================================== */
+
+.ship-export-date-card .ship-header {
+    align-items: center;
+}
+
+.ship-date-field {
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    color: #777;
+    font-size: 13px;
+}
+
+.ship-date-field input {
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid #dddddd;
+    border-radius: 9px;
+    background: white;
+    color: #262626;
+    font: inherit;
+    outline: none;
+}
+
+.ship-date-field input:focus {
+    border-color: #f29a38;
+    box-shadow: 0 0 0 3px rgba(242, 154, 56, 0.10);
+}
+
+@media (max-width: 760px) {
+    .ship-export-date-card .ship-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ship-date-field {
+        min-width: 0;
+        width: 100%;
+    }
+}
