@@ -30,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse, Response
 from shipping_excel import make_sellnow_xlsm, make_shipping_detail_xlsx
+from profit_excel import make_profit_xlsx
 
 
 # =========================================================
@@ -3501,4 +3502,180 @@ def member_edit_save(
         request=request,
         name="member_detail.html",
         context={**member_detail_context(member_id), "message": "會員資料已更新。"},
+    )
+
+
+# =========================================================
+# 利潤報表 / 匯出（沿用舊 Streamlit 計算邏輯）
+# =========================================================
+
+def _profit_decimal(value, default="0"):
+    try:
+        return Decimal(str(value if value not in (None, "") else default))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(default)
+
+
+def _profit_parse_date(value: str, fallback):
+    try:
+        return datetime.strptime(str(value or ""), "%Y-%m-%d").date()
+    except ValueError:
+        return fallback
+
+
+def _profit_date_bounds():
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT MIN(order_time) AS min_date, MAX(order_time) AS max_date
+                FROM orders
+                WHERE order_time IS NOT NULL
+                """
+            )
+            row = cursor.fetchone() or {}
+    finally:
+        conn.close()
+    return row.get("min_date"), row.get("max_date")
+
+
+def _profit_rows(start_date, end_date, rmb_rate, payment_sell_rate, purchase_sell_rate):
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    order_id, order_time, customer_name, platform, tracking_number,
+                    amount_rmb, service_fee, weight_kg, is_arrived, is_returned,
+                    is_early_returned, remarks, order_status
+                FROM orders
+                WHERE order_time >= %s AND order_time <= %s
+                ORDER BY order_time DESC, order_id DESC
+                """,
+                (start_date, end_date),
+            )
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    rr = _profit_decimal(rmb_rate)
+    pay_rate = _profit_decimal(payment_sell_rate)
+    buy_rate = _profit_decimal(purchase_sell_rate)
+    result = []
+    for row in rows:
+        amount = _profit_decimal(row.get("amount_rmb"))
+        fee = _profit_decimal(row.get("service_fee"))
+        weight = _profit_decimal(row.get("weight_kg"))
+        is_payment = str(row.get("customer_name") or "").strip() == "代付"
+        sell_rate = pay_rate if is_payment else buy_rate
+        rate_profit = (amount * (sell_rate - rr)).quantize(Decimal("0.01"))
+        fee = fee.quantize(Decimal("0.01"))
+        total_profit = (rate_profit + fee).quantize(Decimal("0.01"))
+        item = dict(row)
+        item.update({
+            "order_type": "代付" if is_payment else "代購",
+            "amount_rmb_num": amount,
+            "service_fee_num": fee,
+            "weight_num": weight,
+            "sell_rate_num": sell_rate,
+            "rate_profit_num": rate_profit,
+            "total_profit_num": total_profit,
+        })
+        result.append(item)
+    return result
+
+
+def _profit_context(start_date="", end_date="", rmb_rate="0", payment_sell_rate="0", purchase_sell_rate="0"):
+    taiwan_today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    min_date, max_date = _profit_date_bounds()
+    min_date = min_date or taiwan_today
+    max_date = max_date or taiwan_today
+    month_start = taiwan_today.replace(day=1)
+    default_start = max(month_start, min_date)
+    default_end = min(taiwan_today, max_date)
+    if default_start > default_end:
+        default_start = min_date
+        default_end = max_date
+
+    start = _profit_parse_date(start_date, default_start)
+    end = _profit_parse_date(end_date, default_end)
+    if start > end:
+        start, end = end, start
+
+    rr = _profit_decimal(rmb_rate)
+    pay = _profit_decimal(payment_sell_rate)
+    buy = _profit_decimal(purchase_sell_rate)
+    rows = _profit_rows(start, end, rr, pay, buy)
+    payment_rows = [r for r in rows if r["order_type"] == "代付"]
+    purchase_rows = [r for r in rows if r["order_type"] == "代購"]
+
+    rate_profit = sum((r["rate_profit_num"] for r in rows), Decimal("0"))
+    service_fee = sum((r["service_fee_num"] for r in rows), Decimal("0"))
+    total_profit = sum((r["total_profit_num"] for r in rows), Decimal("0"))
+    payment_profit = sum((r["total_profit_num"] for r in payment_rows), Decimal("0"))
+    purchase_profit = sum((r["total_profit_num"] for r in purchase_rows), Decimal("0"))
+
+    return {
+        "rows": rows[:500],
+        "total_count": len(rows),
+        "has_more": len(rows) > 500,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "min_date": min_date.isoformat(),
+        "max_date": max_date.isoformat(),
+        "rmb_rate": str(rr),
+        "payment_sell_rate": str(pay),
+        "purchase_sell_rate": str(buy),
+        "rate_profit": float(rate_profit),
+        "service_fee": float(service_fee),
+        "total_profit": float(total_profit),
+        "payment_count": len(payment_rows),
+        "purchase_count": len(purchase_rows),
+        "payment_profit": float(payment_profit),
+        "purchase_profit": float(purchase_profit),
+    }
+
+
+@app.get("/profit")
+def profit_page(
+    request: Request,
+    start_date: str = "",
+    end_date: str = "",
+    rmb_rate: str = "0",
+    payment_sell_rate: str = "0",
+    purchase_sell_rate: str = "0",
+    admin: str = Depends(verify_admin),
+):
+    context = _profit_context(start_date, end_date, rmb_rate, payment_sell_rate, purchase_sell_rate)
+    return templates.TemplateResponse(request=request, name="profit.html", context=context)
+
+
+@app.post("/profit/export")
+def profit_export(
+    request: Request,
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    rmb_rate: str = Form("0"),
+    payment_sell_rate: str = Form("0"),
+    purchase_sell_rate: str = Form("0"),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    context = _profit_context(start_date, end_date, rmb_rate, payment_sell_rate, purchase_sell_rate)
+    rows = _profit_rows(
+        datetime.strptime(context["start_date"], "%Y-%m-%d").date(),
+        datetime.strptime(context["end_date"], "%Y-%m-%d").date(),
+        context["rmb_rate"], context["payment_sell_rate"], context["purchase_sell_rate"],
+    )
+    data = make_profit_xlsx(
+        rows, context["start_date"], context["end_date"],
+        context["rmb_rate"], context["payment_sell_rate"], context["purchase_sell_rate"],
+    )
+    filename = f"代購利潤報表_{context['start_date'].replace('-', '')}_{context['end_date'].replace('-', '')}.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
