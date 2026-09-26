@@ -25,8 +25,18 @@ MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 OFFICE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PACKAGE = "http://schemas.openxmlformats.org/package/2006/relationships"
 CONTENT = "http://schemas.openxmlformats.org/package/2006/content-types"
+MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+X14AC = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"
+XR = "http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
+XR2 = "http://schemas.microsoft.com/office/spreadsheetml/2015/revision2"
+XR3 = "http://schemas.microsoft.com/office/spreadsheetml/2016/revision3"
 ET.register_namespace("", MAIN)
 ET.register_namespace("r", OFFICE)
+ET.register_namespace("mc", MC)
+ET.register_namespace("x14ac", X14AC)
+ET.register_namespace("xr", XR)
+ET.register_namespace("xr2", XR2)
+ET.register_namespace("xr3", XR3)
 
 SELLER_TEMPLATE_NAME = "賣貨便_批次新增商品區.xlsm"
 SELLER_FIRST_ROW = 7
@@ -195,6 +205,20 @@ def make_sellnow_xlsm(groups, return_date, template_path=None) -> bytes:
         if dimension is not None:
             dimension.set("ref", f"A1:L{max(25, SELLER_FIRST_ROW + len(groups) - 1)}")
         new_sheet = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+        # ElementTree only writes namespace declarations that are referenced by
+        # qualified element/attribute names. xr2/xr3 are referenced only inside
+        # mc:Ignorable text in this Excel template, so add their declarations
+        # explicitly or Excel will repair/remove the worksheet on open.
+        root_tag_end = new_sheet.find(b">", new_sheet.find(b"<worksheet"))
+        root_open = new_sheet[:root_tag_end]
+        root_rest = new_sheet[root_tag_end:]
+        extra_ns = []
+        if b"xmlns:xr2=" not in root_open:
+            extra_ns.append(b' xmlns:xr2="http://schemas.microsoft.com/office/spreadsheetml/2015/revision2"')
+        if b"xmlns:xr3=" not in root_open:
+            extra_ns.append(b' xmlns:xr3="http://schemas.microsoft.com/office/spreadsheetml/2016/revision3"')
+        if extra_ns:
+            new_sheet = root_open + b"".join(extra_ns) + root_rest
 
         output = BytesIO()
         with ZipFile(output, "w", compression=ZIP_DEFLATED) as target:
