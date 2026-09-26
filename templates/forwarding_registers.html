@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}集運登記管理｜橘貓代購{% endblock %}
+{% block content %}
+<div class="page-header forwarding-page-title">
+  <div>
+    <h1><span class="page-title-icon"><i class="bi bi-box-arrow-in-right"></i></span>集運登記管理</h1>
+    <p>處理前台送出的集運包裹登記；標記已處理時會自動建立一筆平台為「集運」的訂單。</p>
+  </div>
+</div>
+
+{% if message %}<div class="ship-msg ship-success"><i class="bi bi-check2-circle"></i><span>{{ message }}</span></div>{% endif %}
+{% if error %}<div class="ship-msg ship-error"><i class="bi bi-exclamation-triangle"></i><span>{{ error }}</span></div>{% endif %}
+
+<section class="forwarding-metrics">
+  <div class="summary-card"><span>待處理</span><strong>{{ counts.get('pending', 0) }}</strong><small> 筆</small></div>
+  <div class="summary-card"><span>已處理</span><strong>{{ counts.get('processed', 0) }}</strong><small> 筆</small></div>
+  <div class="summary-card"><span>已取消</span><strong>{{ counts.get('cancelled', 0) }}</strong><small> 筆</small></div>
+</section>
+
+<section class="forwarding-card">
+  <form method="get" action="/forwarding-registers" class="forwarding-filter-grid">
+    <div class="search-field">
+      <label for="forwarding-keyword">關鍵字</label>
+      <input id="forwarding-keyword" type="text" name="keyword" value="{{ keyword }}" placeholder="客戶、單號、內容物、備註" autocomplete="off">
+    </div>
+    <div class="search-field">
+      <label for="forwarding-status">狀態</label>
+      <select id="forwarding-status" name="status">
+        <option value="pending" {% if status == 'pending' %}selected{% endif %}>待處理</option>
+        <option value="processed" {% if status == 'processed' %}selected{% endif %}>已處理</option>
+        <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>已取消</option>
+        <option value="all" {% if status == 'all' %}selected{% endif %}>全部</option>
+      </select>
+    </div>
+    <div class="forwarding-filter-actions">
+      <a href="/forwarding-registers" class="clear-filter-button">清除條件</a>
+      <button type="submit" class="search-button"><i class="bi bi-search"></i><span>查詢</span></button>
+    </div>
+  </form>
+</section>
+
+<section class="forwarding-card">
+  <div class="forwarding-heading">
+    <div>
+      <h2><span class="section-title-icon"><i class="bi bi-list-ul"></i></span>登記清單</h2>
+      <p>目前顯示 {{ rows|length }} 筆。處理後若快遞單號已存在於 orders，系統只會把登記改成已處理，不會重複建立訂單。</p>
+    </div>
+  </div>
+
+  {% if rows %}
+  <form method="post" action="/forwarding-registers/apply" onsubmit="return forwardingConfirm(this, event)">
+    <input type="hidden" name="status_filter" value="{{ status }}">
+    <input type="hidden" name="keyword_filter" value="{{ keyword }}">
+
+    {% if status in ['pending', 'all'] %}
+    <div class="forwarding-toolbar">
+      <label class="ship-select-all"><input type="checkbox" onchange="forwardingTogglePending(this)"> 全選本頁待處理</label>
+      <div class="forwarding-actions">
+        <button type="submit" name="action" value="processed" class="ship-primary">
+          <i class="bi bi-check2-circle"></i><span>批次標記已處理並建立訂單</span>
+        </button>
+        <button type="submit" name="action" value="cancelled" class="return-cancel-btn">
+          <i class="bi bi-x-circle"></i><span>標記取消</span>
+        </button>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="forwarding-table-wrap">
+      <table class="forwarding-table">
+        <thead>
+          <tr>
+            <th>選取</th><th>登記</th><th>客戶</th><th>快遞單號</th><th>內容物</th>
+            <th>數量</th><th>單價 RMB</th><th>備註</th><th>狀態</th><th>建立時間</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{% if row.status == 'pending' %}<input class="forwarding-pending-checkbox" type="checkbox" name="selected_register_ids" value="{{ row.register_id }}" aria-label="選取登記 {{ row.register_id }}">{% else %}—{% endif %}</td>
+            <td>#{{ row.register_id }}</td>
+            <td class="forwarding-customer">{{ row.customer_name }}</td>
+            <td class="forwarding-tracking">{{ row.tracking_number }}</td>
+            <td>{{ row.item_name }}</td>
+            <td>{{ row.quantity_num }}</td>
+            <td>{{ '%.2f'|format(row.unit_price_num) }}</td>
+            <td class="forwarding-remarks">{{ row.remarks or '—' }}</td>
+            <td><span class="forwarding-status {{ row.status }}">{{ row.status_label }}</span></td>
+            <td class="forwarding-created">{{ row.created_at }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty-state">目前沒有符合條件的集運登記。</div>
+  {% endif %}
+</section>
+
+<script>
+function forwardingTogglePending(master) {
+  document.querySelectorAll('.forwarding-pending-checkbox').forEach(x => x.checked = master.checked);
+}
+function forwardingConfirm(form, event) {
+  const selected = [...form.querySelectorAll('input[name="selected_register_ids"]:checked')];
+  if (!selected.length) {
+    alert('請先勾選至少一筆待處理集運登記。');
+    return false;
+  }
+  const submitter = event && event.submitter ? event.submitter : document.activeElement;
+  const action = submitter && submitter.value === 'cancelled' ? '取消這些登記' : '標記已處理，並將不存在的快遞單號建立成集運訂單';
+  return confirm(`確定要對 ${selected.length} 筆登記執行「${action}」嗎？`);
+}
+</script>
+{% endblock %}
