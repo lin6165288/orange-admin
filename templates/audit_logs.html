@@ -13,9 +13,7 @@
 
     <div>
 
-        <h1>
-            🕘 操作紀錄
-        </h1>
+        <h1><span class="page-title-icon"><i class="bi bi-clock-history"></i></span>操作紀錄</h1>
 
         <p>
             訂單修改與刪除歷史
@@ -26,12 +24,6 @@
 </div>
 
 
-{% if restored %}
-<div class="audit-card" role="status" style="margin-top: 20px; border-color: #9acaaa;">
-    ✓ 訂單 #{{ restored }} 已復原，並留下復原紀錄。
-</div>
-{% endif %}
-<p style="color:#888; font-size:13px; margin-top:16px;">僅能復原此後台刪除時保存的訂單快照；不會自動復原其他資料表中可能已被連動刪除的資料。</p>
 <div class="audit-list">
 
 
@@ -50,11 +42,7 @@
                 <div>
 
 
-                    {% if log.action == "RESTORE" %}
-                        <span class="audit-action audit-update">復原</span>
-                    {% elif log.action == "CREATE" %}
-                        <span class="audit-action audit-create">新增</span>
-                    {% elif log.action == "DELETE" %}
+                    {% if log.action == "DELETE" %}
 
                         <span class="audit-action audit-delete">
                             刪除
@@ -91,18 +79,7 @@
             </div>
 
 
-            {% if log.action == "RESTORE" %}
-                <div class="audit-empty">↩ 已由刪除紀錄 #{{ log.before.get('delete_log_id', '—') }} 復原；客戶：{{ log.after.get('customer_name', '—') }}</div>
-            {% elif log.action == "CREATE" %}
-                <div class="deleted-order-summary">
-                    <div><span>客戶</span><strong>{{ log.after.get('customer_name', '—') }}</strong></div>
-                    <div><span>日期</span><strong>{{ log.after.get('order_time', '—') }}</strong></div>
-                    <div><span>平台</span><strong>{{ log.after.get('platform', '—') }}</strong></div>
-                    <div><span>物流單號</span><strong>{{ log.after.get('tracking_number') or '—' }}</strong></div>
-                    <div><span>人民幣</span><strong>¥{{ log.after.get('amount_rmb', '—') }}</strong></div>
-                    <div><span>重量</span><strong>{{ log.after.get('weight_kg', '—') }} kg</strong></div>
-                </div>
-            {% elif log.action == "UPDATE" %}
+            {% if log.action == "UPDATE" %}
 
 
                 {% if log.changes %}
@@ -264,17 +241,6 @@
 
                 </details>
 
-                {% if log.was_restored %}
-                    <div class="audit-empty">✓ 此刪除紀錄已復原，不能重複使用</div>
-                {% elif log.order_exists %}
-                    <div class="audit-empty">⚠ 訂單編號已存在，為避免覆蓋其他資料，暫不提供復原</div>
-                {% else %}
-                    <form method="post" action="/audit-logs/{{ log.id }}/restore"
-                          onsubmit="return confirm('確認將訂單 #{{ log.order_id }} 復原到資料庫？');"
-                          style="margin-top: 16px;">
-                        <button type="submit" class="detail-edit-button">↩ 復原此筆訂單</button>
-                    </form>
-                {% endif %}
 
             {% endif %}
 
