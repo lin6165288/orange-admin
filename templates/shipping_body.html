@@ -11,7 +11,7 @@
     <div class="ship-options">
       <label><input type="checkbox" name="hide_delayed" value="1" {% if hide_delayed %}checked{% endif %}> 隱藏已延後</label>
       <label><input type="checkbox" name="hide_notified" value="1" {% if hide_notified %}checked{% endif %}> 隱藏已通知</label>
-      <button class="ship-primary" type="submit">🔍 更新名單</button>
+      <button class="ship-primary" type="submit"><i class="bi bi-search"></i><span>更新名單</span></button>
     </div>
   </form>
 </section>
@@ -32,7 +32,7 @@
 <section class="ship-card ship-export-date-card">
   <div class="ship-header">
     <div>
-      <h2>📅 Excel 匯出設定</h2>
+      <h2><span class="section-title-icon"><i class="bi bi-calendar3"></i></span>Excel 匯出設定</h2>
       <p class="ship-muted">匯出賣貨便統整表或運回明細表前，先選擇本次運回日期。兩種檔案會共用這個日期。</p>
     </div>
     <label class="ship-date-field">
@@ -46,7 +46,7 @@
 
 {% if groups %}
 <details class="ship-card ship-summary" open>
-  <summary>📋 各客戶包裹與國際運費（{{ groups|length }} 位）</summary>
+  <summary><span class="section-title-icon"><i class="bi bi-list-ul"></i></span>各客戶包裹與國際運費（{{ groups|length }} 位）</summary>
   <p class="ship-muted ship-fee-hint">國際運費已依每位客戶的「純集運」與「代購」分開合重計算後加總；純集運最低 1 kg、每 0.5 kg 進位、NT$90/kg，代購最低 0.5 kg、每 0.5 kg 進位、NT$70/kg。此處只顯示最終合計，不另外顯示中間計算欄位。</p>
 
   <form id="ship-customer-export" action="/shipping/export" method="post" target="_blank" onsubmit="return shipPrepareCustomerExport(this)">
@@ -62,11 +62,11 @@
           <option value="">選擇客戶批次操作</option>
           {% for action_key,action_name in actions.items() %}<option value="{{ action_key }}">{{ action_name }}</option>{% endfor %}
         </select>
-        <button type="button" class="ship-primary" onclick="shipApplyCustomers()">對勾選客戶執行</button>
+        <button type="button" class="ship-primary" onclick="shipApplyCustomers()"><i class="bi bi-play-circle"></i><span>對勾選客戶執行</span></button>
       </div>
       <div class="ship-export-buttons">
-        <button type="submit" name="export_kind" value="customer_summary" class="ship-export-btn">📥 匯出賣貨便統整表</button>
-        <button type="submit" name="export_kind" value="customer_details" class="ship-export-btn">📥 匯出勾選客戶明細表</button>
+        <button type="submit" name="export_kind" value="customer_summary" class="ship-export-btn"><i class="bi bi-download"></i><span>匯出賣貨便統整表</span></button>
+        <button type="submit" name="export_kind" value="customer_details" class="ship-export-btn"><i class="bi bi-download"></i><span>匯出勾選客戶明細表</span></button>
       </div>
     </div>
 
@@ -153,7 +153,7 @@
     <div class="ship-footer">
       <label class="ship-select-all"><input type="checkbox" onchange="this.closest('form').querySelectorAll('input[name=selected_order_ids]').forEach(x => x.checked = this.checked)"> 全選本頁（最多 100 筆可送出）</label>
       <div class="ship-actions">
-        <button type="button" class="ship-export-btn" onclick="shipExportOrders()">📥 匯出勾選訂單明細表</button>
+        <button type="button" class="ship-export-btn" onclick="shipExportOrders()"><i class="bi bi-download"></i><span>匯出勾選訂單明細表</span></button>
         <select name="action" required aria-label="批次操作">
           <option value="">選擇批次操作</option>
           {% for action_key,action_name in actions.items() %}<option value="{{ action_key }}">{{ action_name }}</option>{% endfor %}
