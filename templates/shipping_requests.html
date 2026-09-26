@@ -3,12 +3,12 @@
 {% block content %}
 <div class="page-header ship-page-title">
   <div>
-    <h1>🚚 出貨管理</h1>
+    <h1><span class="page-title-icon"><i class="bi bi-truck"></i></span>出貨管理</h1>
     <p>查看客戶從前台送出的運回申請，確認包裹後再標記申請狀態。</p>
   </div>
   <div class="ship-page-tabs">
-    <a class="ship-page-tab" href="/shipping">📦 可出貨名單</a>
-    <a class="ship-page-tab active" href="/shipping/requests">📨 前台運回申請</a>
+    <a class="ship-page-tab" href="/shipping"><i class="bi bi-box-seam"></i><span>可出貨名單</span></a>
+    <a class="ship-page-tab active" href="/shipping/requests"><i class="bi bi-envelope-paper"></i><span>前台運回申請</span></a>
   </div>
 </div>
 
@@ -32,7 +32,7 @@
     </div>
     <div class="return-filter-actions">
       <a class="clear-filter-button" href="/shipping/requests">清除條件</a>
-      <button type="submit" class="ship-primary">🔍 查詢</button>
+      <button type="submit" class="ship-primary"><i class="bi bi-search"></i><span>查詢</span></button>
     </div>
   </form>
 </section>
@@ -47,7 +47,7 @@
 <section class="ship-card">
   <div class="ship-header return-request-heading">
     <div>
-      <h2>📨 前台運回申請</h2>
+      <h2><span class="section-title-icon"><i class="bi bi-envelope-paper"></i></span>前台運回申請</h2>
       <p class="ship-muted">「已處理 / 已取消」只會修改申請狀態，不會自動把訂單改成已運回。實際出貨完成後仍可回到「可出貨名單」批次標記。</p>
     </div>
   </div>
@@ -60,8 +60,8 @@
       {% if status == 'pending' or status == 'all' %}
       <label class="ship-select-all"><input type="checkbox" onchange="togglePendingRequests(this)"> 全選本頁待處理申請</label>
       <div class="return-request-actions">
-        <button type="submit" name="action" value="processed" class="ship-primary">✅ 標記已處理</button>
-        <button type="submit" name="action" value="cancelled" class="return-cancel-btn">🗑 標記取消</button>
+        <button type="submit" name="action" value="processed" class="ship-primary"><i class="bi bi-check2-circle"></i><span>標記已處理</span></button>
+        <button type="submit" name="action" value="cancelled" class="return-cancel-btn"><i class="bi bi-trash3"></i><span>標記取消</span></button>
       </div>
       {% endif %}
     </div>
