@@ -2339,3 +2339,60 @@ body {
         width: 100%;
     }
 }
+
+/* ======================================================
+   Shipping customer batch controls / compact fee summary
+====================================================== */
+
+.ship-customer-toolbar {
+    align-items: center;
+}
+
+.ship-customer-tools {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.ship-customer-tools select {
+    min-height: 42px;
+    padding: 9px 12px;
+    border: 1px solid #dddddd;
+    border-radius: 9px;
+    background: white;
+    color: #444;
+    min-width: 190px;
+}
+
+.ship-fee-table-compact {
+    min-width: 620px;
+}
+
+.ship-fee-table-compact th:first-child,
+.ship-fee-table-compact td:first-child {
+    width: 76px;
+    text-align: center;
+}
+
+.ship-fee-table-compact th:last-child,
+.ship-fee-table-compact td:last-child {
+    width: 180px;
+}
+
+@media (max-width: 900px) {
+    .ship-customer-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ship-customer-tools,
+    .ship-export-buttons {
+        width: 100%;
+    }
+
+    .ship-customer-tools select,
+    .ship-customer-tools button {
+        flex: 1;
+    }
+}
