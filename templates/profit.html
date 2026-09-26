@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}利潤報表｜橘貓代購{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1><span class="page-title-icon"><i class="bi bi-graph-up"></i></span>利潤報表</h1>
+    <p>依日期與匯率即時計算匯率價差、手續費收入及總利潤。</p>
+  </div>
+</div>
+
+<section class="profit-filter-card">
+  <form method="get" action="/profit" class="profit-filter-form">
+    <div class="profit-filter-grid">
+      <div class="search-field"><label>人民幣匯率</label><input type="number" name="rmb_rate" min="0" step="0.01" value="{{ rmb_rate }}"></div>
+      <div class="search-field"><label>代付定價匯率</label><input type="number" name="payment_sell_rate" min="0" step="0.01" value="{{ payment_sell_rate }}"></div>
+      <div class="search-field"><label>代購定價匯率</label><input type="number" name="purchase_sell_rate" min="0" step="0.01" value="{{ purchase_sell_rate }}"></div>
+      <div class="search-field"><label>起始日期</label><input type="date" name="start_date" min="{{ min_date }}" max="{{ max_date }}" value="{{ start_date }}"></div>
+      <div class="search-field"><label>結束日期</label><input type="date" name="end_date" min="{{ min_date }}" max="{{ max_date }}" value="{{ end_date }}"></div>
+      <div class="profit-filter-action"><button type="submit" class="search-button"><i class="bi bi-calculator"></i><span>重新計算</span></button></div>
+    </div>
+    <p class="profit-hint">客戶姓名完全等於「代付」時使用代付定價匯率，其餘訂單使用代購定價匯率；計算方式沿用舊版後台。</p>
+  </form>
+</section>
+
+<section class="profit-kpis">
+  <div class="profit-kpi"><span>匯率價差利潤</span><strong>NT$ {{ '{:,.2f}'.format(rate_profit) }}</strong></div>
+  <div class="profit-kpi"><span>手續費收入</span><strong>NT$ {{ '{:,.2f}'.format(service_fee) }}</strong></div>
+  <div class="profit-kpi profit-kpi-main"><span>總利潤</span><strong>NT$ {{ '{:,.2f}'.format(total_profit) }}</strong></div>
+</section>
+
+<section class="profit-type-grid">
+  <div class="profit-type-card"><div><span class="profit-type-icon"><i class="bi bi-arrow-left-right"></i></span><span>代付訂單</span></div><strong>{{ payment_count }} 筆</strong><small>總利潤 NT$ {{ '{:,.2f}'.format(payment_profit) }}</small></div>
+  <div class="profit-type-card"><div><span class="profit-type-icon"><i class="bi bi-bag"></i></span><span>代購訂單</span></div><strong>{{ purchase_count }} 筆</strong><small>總利潤 NT$ {{ '{:,.2f}'.format(purchase_profit) }}</small></div>
+</section>
+
+<section class="profit-table-card">
+  <div class="profit-table-head">
+    <div><h2>訂單明細</h2><p>{{ start_date }} ～ {{ end_date }}，共 {{ total_count }} 筆</p></div>
+    <form method="post" action="/profit/export">
+      <input type="hidden" name="start_date" value="{{ start_date }}"><input type="hidden" name="end_date" value="{{ end_date }}">
+      <input type="hidden" name="rmb_rate" value="{{ rmb_rate }}"><input type="hidden" name="payment_sell_rate" value="{{ payment_sell_rate }}"><input type="hidden" name="purchase_sell_rate" value="{{ purchase_sell_rate }}">
+      <button type="submit" class="profit-export-button"><i class="bi bi-download"></i><span>匯出 Excel</span></button>
+    </form>
+  </div>
+  {% if has_more %}<div class="profit-warning">明細畫面只顯示最近 500 筆，但上方統計與 Excel 匯出仍包含此日期區間的全部訂單。</div>{% endif %}
+  {% if rows %}
+  <div class="profit-table-wrap"><table class="profit-table"><thead><tr><th>訂單</th><th>日期</th><th>姓名</th><th>類型</th><th>平台</th><th>人民幣</th><th>適用匯率</th><th>匯率價差</th><th>手續費</th><th>總利潤</th></tr></thead><tbody>
+  {% for row in rows %}<tr><td>#{{ row.order_id }}</td><td>{{ row.order_time or '—' }}</td><td class="profit-name">{{ row.customer_name or '—' }}</td><td><span class="profit-type-pill {{ 'payment' if row.order_type == '代付' else 'purchase' }}">{{ row.order_type }}</span></td><td>{{ row.platform or '—' }}</td><td>¥{{ '%.2f'|format(row.amount_rmb_num) }}</td><td>{{ row.sell_rate_num }}</td><td>NT$ {{ '%.2f'|format(row.rate_profit_num) }}</td><td>NT$ {{ '%.2f'|format(row.service_fee_num) }}</td><td class="profit-total-cell">NT$ {{ '%.2f'|format(row.total_profit_num) }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state">此日期區間目前沒有訂單資料。</div>{% endif %}
+</section>
+{% endblock %}
