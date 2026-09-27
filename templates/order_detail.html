@@ -35,12 +35,14 @@
     <div class="detail-item"><span>人民幣金額</span><strong>{% if order.amount_rmb is not none %}¥{{ order.amount_rmb }}{% else %}—{% endif %}</strong></div>
     <div class="detail-item"><span>重量</span><strong>{% if order.weight_kg is not none %}{{ order.weight_kg }} kg{% else %}—{% endif %}</strong></div>
     <div class="detail-item"><span>手續費</span><strong>{% if order.service_fee is not none %}NT$ {{ order.service_fee }}{% else %}—{% endif %}</strong></div>
+    <div class="detail-item"><span>採購付款</span><strong>{{ '刷卡' if order.purchase_payment_method == 'card' else '支付寶' }}</strong></div>
+    <div class="detail-item"><span>刷卡成本</span><strong>{% if order.purchase_payment_method == 'card' and order.card_cost_twd is not none %}NT$ {{ order.card_cost_twd }}{% else %}—{% endif %}</strong></div>
     <div class="detail-item"><span>會員快照</span><strong>{{ order.member_level_snapshot or "—" }}</strong></div>
     <div class="detail-item"><span>訂單狀態</span><strong>{{ order.order_status or "正常" }}</strong></div>
   </div>
 
   <div class="detail-status-row">
-    <span class="detail-status {% if order.is_arrived %}yes{% endif %}">到貨：{{ "是" if order.is_arrived else "否" }}</span>
+    <span class="detail-status {% if order.is_arrived %}yes{% endif %}">到倉：{{ "是" if order.is_arrived else "否" }}</span>
     <span class="detail-status {% if order.is_returned %}yes{% endif %}">已運回：{{ "是" if order.is_returned else "否" }}</span>
     <span class="detail-status {% if order.is_early_returned %}yes{% endif %}">提前運回：{{ "是" if order.is_early_returned else "否" }}</span>
   </div>

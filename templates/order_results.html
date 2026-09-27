@@ -76,9 +76,11 @@
           {% elif order.is_returned %}
             <span class="status status-returned">已運回</span>
           {% elif order.is_arrived %}
-            <span class="status status-arrived">已到貨</span>
-          {% else %}
+            <span class="status status-arrived">已到倉</span>
+          {% elif order.tracking_number %}
             <span class="status status-normal">運送中</span>
+          {% else %}
+            <span class="status status-unshipped">未出貨</span>
           {% endif %}
         </td>
       </tr>

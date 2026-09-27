@@ -18,7 +18,6 @@
                 <datalist id="new-name-options">
                     {% for item in customer_names %}<option value="{{ item }}"></option>{% endfor %}
                 </datalist>
-                <p class="create-hint">輸入姓名即可選擇既有客人，沒有的姓名會在儲存時建立會員資料。</p>
             </div>
             <div class="edit-field create-field">
                 <label for="new-date">下單日期 <b class="required">*</b></label>
@@ -45,15 +44,41 @@
                 <input id="new-weight" name="weight_kg" type="number" value="{{ weight_kg }}" min="0" max="99999999.99" step="0.01" required>
             </div>
         </div>
+
+        <div class="create-payment-block">
+            <div class="create-heading">採購付款方式</div>
+            <div class="payment-method-switch" role="radiogroup" aria-label="採購付款方式">
+                <label class="payment-method-option">
+                    <input type="radio" name="purchase_payment_method" value="alipay"
+                           {% if purchase_payment_method != 'card' %}checked{% endif %}
+                           onchange="toggleCardCostField()">
+                    <span><i class="bi bi-wallet2"></i> 支付寶</span>
+                </label>
+                <label class="payment-method-option">
+                    <input type="radio" name="purchase_payment_method" value="card"
+                           {% if purchase_payment_method == 'card' %}checked{% endif %}
+                           onchange="toggleCardCostField()">
+                    <span><i class="bi bi-credit-card"></i> 刷卡</span>
+                </label>
+            </div>
+            <div id="card-cost-field" class="edit-field create-field card-cost-field {% if purchase_payment_method != 'card' %}is-hidden{% endif %}">
+                <label for="new-card-cost">刷卡金額（台幣成本）</label>
+                <div class="input-prefix">
+                    <span>NT$</span>
+                    <input id="new-card-cost" name="card_cost_twd" type="number"
+                           value="{{ card_cost_twd }}" min="0" max="999999999.99" step="0.01"
+                           placeholder="輸入本單實際刷卡台幣金額">
+                </div>
+            </div>
+        </div>
         <div class="create-fee-area">
             <div class="create-heading">代購手續費</div>
             <div id="fee-preview">
                 {% include "new_order_fee.html" %}
             </div>
-            <div class="create-hint">以送出時的姓名／會員等級／金額／平台重新計算，集運手續費為 0；不會採用畫面上過時的預覽數字。</div>
         </div>
         <div class="edit-status-box create-status">
-            <label class="edit-checkbox"><input type="checkbox" name="is_arrived" value="1" {% if is_arrived %}checked{% endif %}> 已到貨</label>
+            <label class="edit-checkbox"><input type="checkbox" name="is_arrived" value="1" {% if is_arrived %}checked{% endif %}> 已到倉</label>
             <label class="edit-checkbox"><input type="checkbox" name="is_returned" value="1" {% if is_returned %}checked{% endif %}> 已運回</label>
         </div>
         <div class="edit-field edit-remarks create-field">
@@ -66,3 +91,17 @@
         </div>
     </form>
 </section>
+
+<script>
+function toggleCardCostField() {
+    const selected = document.querySelector('input[name="purchase_payment_method"]:checked');
+    const block = document.getElementById('card-cost-field');
+    const input = document.getElementById('new-card-cost');
+    if (!selected || !block || !input) return;
+    const isCard = selected.value === 'card';
+    block.classList.toggle('is-hidden', !isCard);
+    input.required = isCard;
+    if (!isCard) input.value = '';
+}
+toggleCardCostField();
+</script>

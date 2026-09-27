@@ -27,12 +27,27 @@
     <div><span>未運回</span><strong>{{ stats.unreturned_count }}</strong></div>
     <div><span>累計重量</span><strong>{{ '%.2f'|format(stats.total_weight_num) }} kg</strong></div>
     <div><span>累計人民幣</span><strong>¥{{ '%.2f'|format(stats.total_rmb_num) }}</strong></div>
+    <div><span>目前點數</span><strong>{{ points_balance }}</strong></div>
   </div>
 
   <div class="member-note-box">
     <span>會員備註</span>
     <p>{{ member.note or '目前沒有備註。' }}</p>
   </div>
+
+  <div class="member-orders-title"><span class="section-title-icon"><i class="bi bi-ticket-perforated"></i></span>最近優惠券</div>
+  {% if member_coupons %}
+  <div class="member-coupon-list">
+    {% for coupon in member_coupons %}
+    <div class="member-coupon-item">
+      <div><strong>{{ coupon.coupon_name or '未命名優惠券' }}</strong><small>{{ coupon.issued_at or '' }}</small></div>
+      <span class="reward-status {{ coupon.status }}">{{ '未使用' if coupon.status == 'unused' else ('已使用' if coupon.status == 'used' else '已取消') }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="member-orders-empty">目前沒有優惠券。</div>
+  {% endif %}
 
   <div class="member-orders-title"><span class="section-title-icon"><i class="bi bi-clock-history"></i></span>最近訂單紀錄 <small>最多顯示 50 筆</small></div>
   {% if orders %}
@@ -51,8 +66,9 @@
           <td>
             {% if order.order_status == '取消' %}<span class="status status-cancel">取消</span>
             {% elif order.is_returned %}<span class="status status-returned">已運回</span>
-            {% elif order.is_arrived %}<span class="status status-arrived">已到貨</span>
-            {% else %}<span class="status status-normal">運送中</span>{% endif %}
+            {% elif order.is_arrived %}<span class="status status-arrived">已到倉</span>
+            {% elif order.tracking_number %}<span class="status status-normal">運送中</span>
+            {% else %}<span class="status status-unshipped">未出貨</span>{% endif %}
           </td>
         </tr>
       {% endfor %}

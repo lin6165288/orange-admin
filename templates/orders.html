@@ -4,7 +4,6 @@
 <div class="page-header">
   <div>
     <h1><span class="page-title-icon"><i class="bi bi-search"></i></span>訂單管理</h1>
-    <p>整合訂單總表、搜尋與編輯。預設直接顯示最近 100 筆訂單。</p>
   </div>
   <a class="search-button orders-new-link" href="/orders/new">
     <i class="bi bi-plus-square"></i><span>新增訂單</span>
@@ -59,11 +58,11 @@
       </div>
 
       <div class="search-field">
-        <label>到貨狀態</label>
+        <label>到倉狀態</label>
         <select name="search_arrived_status">
           <option value="" {% if not search_arrived_status %}selected{% endif %}>全部</option>
-          <option value="arrived" {% if search_arrived_status == 'arrived' %}selected{% endif %}>已到貨</option>
-          <option value="unarrived" {% if search_arrived_status == 'unarrived' %}selected{% endif %}>未到貨</option>
+          <option value="arrived" {% if search_arrived_status == 'arrived' %}selected{% endif %}>已到倉</option>
+          <option value="unarrived" {% if search_arrived_status == 'unarrived' %}selected{% endif %}>未到倉</option>
         </select>
       </div>
 

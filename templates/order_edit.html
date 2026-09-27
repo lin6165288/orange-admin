@@ -64,13 +64,37 @@
       </div>
     </div>
 
+    <div class="order-edit-payment">
+      <div class="edit-field">
+        <label>採購付款方式</label>
+        <div class="payment-method-switch" role="radiogroup" aria-label="採購付款方式">
+          <label class="payment-method-option">
+            <input type="radio" name="purchase_payment_method" value="alipay"
+                   {% if order.purchase_payment_method != 'card' %}checked{% endif %}
+                   onchange="toggleEditCardCost()">
+            <span><i class="bi bi-wallet2"></i> 支付寶</span>
+          </label>
+          <label class="payment-method-option">
+            <input type="radio" name="purchase_payment_method" value="card"
+                   {% if order.purchase_payment_method == 'card' %}checked{% endif %}
+                   onchange="toggleEditCardCost()">
+            <span><i class="bi bi-credit-card"></i> 刷卡</span>
+          </label>
+        </div>
+      </div>
+      <div id="edit-card-cost-field" class="edit-field {% if order.purchase_payment_method != 'card' %}is-hidden{% endif %}">
+        <label>刷卡金額（台幣成本）</label>
+        <div class="input-prefix"><span>NT$</span><input id="edit-card-cost" name="card_cost_twd" inputmode="decimal" value="{{ order.card_cost_twd if order.card_cost_twd is not none else '' }}"></div>
+      </div>
+    </div>
+
     <div class="edit-field orders-edit-note">
       <label>備註</label>
       <textarea name="remarks" rows="4">{{ order.remarks or '' }}</textarea>
     </div>
 
     <div class="edit-status-box">
-      <label class="filter-check"><input type="checkbox" name="is_arrived" value="1" {% if order.is_arrived %}checked{% endif %}>已到貨</label>
+      <label class="filter-check"><input type="checkbox" name="is_arrived" value="1" {% if order.is_arrived %}checked{% endif %}>已到倉</label>
       <label class="filter-check"><input type="checkbox" name="is_returned" value="1" {% if order.is_returned %}checked{% endif %}>已運回</label>
     </div>
 
@@ -89,3 +113,17 @@
     </div>
   </form>
 </div>
+
+<script>
+function toggleEditCardCost() {
+  const selected = document.querySelector('#order-detail-{{ order.order_id }} input[name="purchase_payment_method"]:checked');
+  const block = document.getElementById('edit-card-cost-field');
+  const input = document.getElementById('edit-card-cost');
+  if (!selected || !block || !input) return;
+  const isCard = selected.value === 'card';
+  block.classList.toggle('is-hidden', !isCard);
+  input.required = isCard;
+  if (!isCard) input.value = '';
+}
+toggleEditCardCost();
+</script>

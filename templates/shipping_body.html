@@ -1,12 +1,11 @@
 <section class="ship-card">
   <h2>選擇出貨名單</h2>
-  <p class="ship-muted">可出貨：同一客戶尚未運回的非取消訂單均已到貨，或這筆已到貨並標記提前運回。兩種模式均不列出「已運回」包裹。</p>
   <form hx-get="/shipping/list" hx-target="#shipping-body" hx-swap="innerHTML" class="ship-filter">
     <div class="ship-modes">
       <label><input type="radio" name="mode" value="ready" {% if mode == 'ready' %}checked{% endif %}> 系統判定可出貨</label>
       <label><input type="radio" name="mode" value="customer" {% if mode == 'customer' %}checked{% endif %}> 依客戶姓名批次處理</label>
     </div>
-    <label class="ship-name-label" for="ship-customer">客戶姓名（只有選「依客戶姓名」才需要填）</label>
+    <label class="ship-name-label" for="ship-customer">客戶姓名</label>
     <input id="ship-customer" name="customer" maxlength="50" value="{{ customer }}" placeholder="輸入客戶姓名（可部分搜尋）" class="ship-input" autocomplete="off">
     <div class="ship-options">
       <label><input type="checkbox" name="hide_delayed" value="1" {% if hide_delayed %}checked{% endif %}> 隱藏已延後</label>
@@ -33,7 +32,6 @@
   <div class="ship-header">
     <div>
       <h2><span class="section-title-icon"><i class="bi bi-calendar3"></i></span>Excel 匯出設定</h2>
-      <p class="ship-muted">匯出賣貨便統整表或運回明細表前，先選擇本次運回日期。兩種檔案會共用這個日期。</p>
     </div>
     <label class="ship-date-field">
       <span>運回日期</span>
@@ -47,7 +45,6 @@
 {% if groups %}
 <details class="ship-card ship-summary" open>
   <summary><span class="section-title-icon"><i class="bi bi-list-ul"></i></span>各客戶包裹與國際運費（{{ groups|length }} 位）</summary>
-  <p class="ship-muted ship-fee-hint">國際運費已依每位客戶的「純集運」與「代購」分開合重計算後加總；純集運最低 1 kg、每 0.5 kg 進位、NT$90/kg，代購最低 0.5 kg、每 0.5 kg 進位、NT$70/kg。此處只顯示最終合計，不另外顯示中間計算欄位。</p>
 
   <form id="ship-customer-export" action="/shipping/export" method="post" target="_blank" onsubmit="return shipPrepareCustomerExport(this)">
     <input type="hidden" name="mode" value="{{ mode }}">
@@ -70,7 +67,6 @@
       </div>
     </div>
 
-    <p class="ship-muted">勾選客戶後，可直接批次操作該客戶「目前名單中」的所有未運回訂單，也可匯出統整或明細。標記已運回時，如其中有尚未到貨或仍標記延後的訂單，整批會停止並提示原因。</p>
 
     <div class="ship-fee-table-wrap">
       <table class="ship-fee-table ship-fee-table-compact">
@@ -110,7 +106,7 @@
 
 {% if rows %}
 <section class="ship-card">
-  <div class="ship-header"><h2>訂單清單</h2><span class="ship-muted">每批最多選 100 筆；已運回訂單不會出現在此清單，只會修改勾選的訂單。</span></div>
+  <div class="ship-header"><h2>訂單清單</h2><span class="ship-muted">每批最多選 100 筆</span></div>
 
   <form id="ship-order-export" action="/shipping/export" method="post" target="_blank">
     <input type="hidden" name="mode" value="{{ mode }}">
@@ -148,7 +144,6 @@
     {% endfor %}
     </tbody></table></div>
 
-    <p class="ship-muted">匯出勾選訂單明細時，同一客戶的重複物流單號只列 1 件；「下單順序」欄位會留白供你自行填寫。「標記已運回」只允許已到貨、未延後的訂單。</p>
 
     <div class="ship-footer">
       <label class="ship-select-all"><input type="checkbox" onchange="this.closest('form').querySelectorAll('input[name=selected_order_ids]').forEach(x => x.checked = this.checked)"> 全選本頁（最多 100 筆可送出）</label>
