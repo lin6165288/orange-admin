@@ -3816,11 +3816,9 @@ def reconcile_cancelled_order_points():
                     opa.order_id,
                     opa.member_id,
                     opa.points_awarded,
-                    opa.batch_id,
-                    m.customer_name
+                    opa.batch_id
                 FROM order_point_awards opa
                 INNER JOIN orders o ON o.order_id = opa.order_id
-                LEFT JOIN members m ON m.member_id = opa.member_id
                 WHERE opa.is_reversed = 0
                   AND COALESCE(o.order_status, '正常') = '取消'
                 ORDER BY opa.award_id ASC
@@ -3952,6 +3950,12 @@ def _reward_points_date_range(start_date="", end_date=""):
 
 
 def load_reward_order_candidates(start_date="", end_date=""):
+    """載入日期區間訂單與既有送點狀態。
+
+    orders 與 members 不直接用 customer_name 做 SQL JOIN。
+    兩表可能來自不同時期、不同 collation；改在 Python 以姓名合併，
+    避免 MySQL `Illegal mix of collations` 造成 /rewards 500。
+    """
     ensure_rewards_tables()
     sync_members_from_orders_admin()
 
@@ -3972,8 +3976,6 @@ def load_reward_order_candidates(start_date="", end_date=""):
                     o.is_arrived,
                     o.is_returned,
                     o.order_status,
-                    m.member_id,
-                    m.member_level,
                     COALESCE(SUM(
                         CASE
                             WHEN opa.is_reversed = 0 THEN opa.points_awarded
@@ -3981,8 +3983,6 @@ def load_reward_order_candidates(start_date="", end_date=""):
                         END
                     ), 0) AS active_awarded_points
                 FROM orders o
-                LEFT JOIN members m
-                    ON m.customer_name = o.customer_name
                 LEFT JOIN order_point_awards opa
                     ON opa.order_id = o.order_id
                 WHERE DATE(o.order_time) BETWEEN %s AND %s
@@ -3996,19 +3996,42 @@ def load_reward_order_candidates(start_date="", end_date=""):
                     o.amount_rmb,
                     o.is_arrived,
                     o.is_returned,
-                    o.order_status,
-                    m.member_id,
-                    m.member_level
+                    o.order_status
                 ORDER BY o.order_time DESC, o.order_id DESC
                 LIMIT 1000
                 """,
                 (start_value, end_value),
             )
             rows = cursor.fetchall()
+
+            # members.customer_name 是 UNIQUE，直接整批讀取後在 Python 合併。
+            cursor.execute(
+                """
+                SELECT member_id, customer_name, member_level
+                FROM members
+                """
+            )
+            member_rows = cursor.fetchall()
+
+        member_map = {}
+        for member in member_rows:
+            name = str(member.get("customer_name") or "").strip()
+            if name:
+                member_map[name] = {
+                    "member_id": member.get("member_id"),
+                    "member_level": member.get("member_level") or "一般會員",
+                }
+
+        for row in rows:
+            name = str(row.get("customer_name") or "").strip()
+            member = member_map.get(name) or {}
+            row["member_id"] = member.get("member_id")
+            row["member_level"] = member.get("member_level") or "一般會員"
+
+        return rows, start_value, end_value
+
     finally:
         conn.close()
-
-    return rows, start_value, end_value
 
 
 def rewards_context(
@@ -4020,7 +4043,19 @@ def rewards_context(
     ensure_rewards_tables()
     sync_members_from_orders_admin()
 
-    reversed_count, reversed_points = reconcile_cancelled_order_points()
+    reversed_count = 0
+    reversed_points = 0
+    reconciliation_warning = ""
+
+    try:
+        reversed_count, reversed_points = reconcile_cancelled_order_points()
+    except Exception as exc:
+        # 自動對帳不應讓整個優惠券 / 點數頁無法開啟。
+        reconciliation_warning = (
+            "取消訂單點數自動對帳暫時未執行；"
+            "其他優惠券與點數功能仍可使用。"
+        )
+
     point_orders, point_start, point_end = load_reward_order_candidates(
         points_start_date,
         points_end_date,
@@ -4161,7 +4196,7 @@ def rewards_context(
     finally:
         conn.close()
 
-    auto_reversal_message = ""
+    auto_reversal_message = reconciliation_warning
     if reversed_count:
         auto_reversal_message = (
             f"已自動處理 {reversed_count} 筆取消訂單，"
@@ -4309,16 +4344,26 @@ async def rewards_points_batch_award(
                     o.order_id,
                     o.order_time,
                     o.customer_name,
-                    o.order_status,
-                    m.member_id
+                    o.order_status
                 FROM orders o
-                LEFT JOIN members m ON m.customer_name = o.customer_name
                 WHERE o.order_id IN ({placeholders})
                 FOR UPDATE
                 """,
                 selected_ids,
             )
             order_rows = {int(row["order_id"]): row for row in cursor.fetchall()}
+
+            cursor.execute(
+                """
+                SELECT member_id, customer_name
+                FROM members
+                """
+            )
+            member_name_map = {
+                str(row.get("customer_name") or "").strip(): row.get("member_id")
+                for row in cursor.fetchall()
+                if str(row.get("customer_name") or "").strip()
+            }
 
             for order_id in selected_ids:
                 row = order_rows.get(order_id)
@@ -4340,7 +4385,8 @@ async def rewards_points_batch_award(
                     skipped_count += 1
                     continue
 
-                member_id = row.get("member_id")
+                customer_name = str(row.get("customer_name") or "").strip()
+                member_id = member_name_map.get(customer_name)
                 if not member_id:
                     skipped_count += 1
                     continue
