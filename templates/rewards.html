@@ -9,6 +9,7 @@
 
 {% if message %}<div class="reward-message success"><i class="bi bi-check2-circle"></i><span>{{ message }}</span></div>{% endif %}
 {% if error %}<div class="reward-message error"><i class="bi bi-exclamation-circle"></i><span>{{ error }}</span></div>{% endif %}
+{% if auto_reversal_message %}<div class="reward-message success"><i class="bi bi-arrow-counterclockwise"></i><span>{{ auto_reversal_message }}</span></div>{% endif %}
 
 <div class="reward-kpi-grid">
   <div class="reward-kpi"><span>目前總點數</span><strong>{{ total_points }}</strong></div>
@@ -16,9 +17,119 @@
   <div class="reward-kpi"><span>啟用中優惠券方案</span><strong>{{ active_coupon_templates }}</strong></div>
 </div>
 
-<div class="reward-grid">
+<section class="reward-card reward-point-batch-card">
+  <div class="reward-card-head reward-point-batch-head">
+    <h2><i class="bi bi-calendar-check"></i> 訂單批次送點</h2>
+    <span>依下單日期篩選訂單後勾選，統一設定每筆訂單要送的點數。</span>
+  </div>
+
+  <form method="get" action="/rewards" class="reward-point-date-form">
+    <div class="search-field">
+      <label>起始日期</label>
+      <input type="date" name="points_start_date" value="{{ points_start_date }}">
+    </div>
+    <div class="search-field">
+      <label>結束日期</label>
+      <input type="date" name="points_end_date" value="{{ points_end_date }}">
+    </div>
+    <div class="reward-form-action">
+      <button class="search-button" type="submit"><i class="bi bi-search"></i><span>載入訂單</span></button>
+    </div>
+  </form>
+
+  <form method="post" action="/rewards/points/batch-award" id="reward-point-batch-form">
+    <input type="hidden" name="points_start_date" value="{{ points_start_date }}">
+    <input type="hidden" name="points_end_date" value="{{ points_end_date }}">
+
+    <div class="reward-point-batch-settings">
+      <div class="search-field">
+        <label>每筆訂單加幾點</label>
+        <input type="number" name="points_per_order" min="1" step="1" value="1" required>
+      </div>
+      <div class="search-field reward-field-wide">
+        <label>送點原因</label>
+        <input type="text" name="reason" maxlength="255" placeholder="例如：一般消費點數、會員日雙倍點數">
+      </div>
+      <label class="reward-check reward-repeat-check">
+        <input type="checkbox" name="allow_repeat" value="1">
+        <span>允許同一訂單再次加點</span>
+      </label>
+    </div>
+
+    {% if point_orders %}
+    <div class="reward-point-table-tools">
+      <label class="reward-check">
+        <input type="checkbox" id="reward-select-all-orders" onchange="toggleRewardOrderSelection(this.checked)">
+        <span>全選目前訂單</span>
+      </label>
+      <span>{{ points_start_date }} ～ {{ points_end_date }}，共 {{ point_orders|length }} 筆</span>
+    </div>
+
+    <div class="reward-table-wrap reward-point-orders-wrap">
+      <table class="reward-table reward-point-orders-table">
+        <thead>
+          <tr>
+            <th>選取</th>
+            <th>訂單</th>
+            <th>下單日期</th>
+            <th>會員</th>
+            <th>平台</th>
+            <th>人民幣</th>
+            <th>包裹狀態</th>
+            <th>目前已送點</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for order in point_orders %}
+          <tr>
+            <td><input class="reward-order-checkbox" type="checkbox" name="order_ids" value="{{ order.order_id }}"></td>
+            <td><strong>#{{ order.order_id }}</strong></td>
+            <td>{{ order.order_time or '—' }}</td>
+            <td>
+              <strong>{{ order.customer_name or '—' }}</strong>
+              <small>{{ order.member_level or '一般會員' }}</small>
+            </td>
+            <td>{{ order.platform or '—' }}</td>
+            <td>{% if order.amount_rmb is not none %}¥{{ order.amount_rmb }}{% else %}—{% endif %}</td>
+            <td>
+              {% if order.is_returned %}
+                <span class="status status-returned">已運回</span>
+              {% elif order.is_arrived %}
+                <span class="status status-arrived">已到倉</span>
+              {% elif order.tracking_number %}
+                <span class="status status-normal">運送中</span>
+              {% else %}
+                <span class="status status-unshipped">未出貨</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if order.active_awarded_points %}
+                <span class="reward-existing-points">{{ order.active_awarded_points }} 點</span>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="reward-point-submit-row">
+      <span id="reward-selected-order-count">尚未選擇訂單</span>
+      <button class="search-button" type="submit" onclick="return confirmRewardPointBatch()">
+        <i class="bi bi-plus-circle"></i><span>批次送點</span>
+      </button>
+    </div>
+    {% else %}
+      <div class="empty-state">此日期區段目前沒有可送點的非取消訂單。</div>
+    {% endif %}
+  </form>
+</section>
+
+<div class="reward-grid reward-secondary-grid">
   <section class="reward-card">
-    <h2><i class="bi bi-coin"></i> 點數調整</h2>
+    <h2><i class="bi bi-coin"></i> 單一會員人工調整</h2>
     <form method="post" action="/rewards/points/adjust" class="reward-form">
       <div class="search-field">
         <label>會員</label>
@@ -35,7 +146,7 @@
       </div>
       <div class="search-field reward-field-wide">
         <label>原因</label>
-        <input type="text" name="reason" maxlength="255" placeholder="例如：活動贈點、人工扣點">
+        <input type="text" name="reason" maxlength="255" placeholder="例如：人工補點、人工扣點">
       </div>
       <div class="reward-form-action">
         <button class="search-button" type="submit"><i class="bi bi-check2"></i><span>更新點數</span></button>
@@ -50,10 +161,26 @@
         <label>優惠券名稱</label>
         <input type="text" name="coupon_name" maxlength="120" placeholder="例如：首單免手續費" required>
       </div>
+
+      <div class="search-field">
+        <label>核銷規則</label>
+        <select name="effect_type" id="reward-effect-type" onchange="toggleRewardEffectValue()">
+          <option value="manual">核銷時決定</option>
+          <option value="service_fee_free">手續費全免</option>
+          <option value="service_fee_discount">手續費固定折抵</option>
+        </select>
+      </div>
+
+      <div class="search-field" id="reward-effect-value-wrap" style="display:none">
+        <label>折抵金額（NT$）</label>
+        <input type="number" name="effect_value" min="0" step="0.01" placeholder="例如 30">
+      </div>
+
       <div class="search-field reward-field-wide">
         <label>內容</label>
-        <input type="text" name="description" placeholder="可先簡單記錄用途">
+        <input type="text" name="description" placeholder="例如：每月首單手續費全免">
       </div>
+
       <div class="reward-form-action">
         <button class="search-button" type="submit"><i class="bi bi-plus-lg"></i><span>新增方案</span></button>
       </div>
@@ -63,16 +190,35 @@
 
 <section class="reward-card reward-issue-card">
   <h2><i class="bi bi-send"></i> 發放優惠券</h2>
-  <form method="post" action="/rewards/coupons/issue" class="reward-form reward-issue-form">
+  <form method="post" action="/rewards/coupons/issue" class="reward-form reward-issue-form reward-issue-form-v2">
     <div class="search-field">
+      <label>發放對象</label>
+      <select name="target_type" id="reward-target-type" onchange="toggleRewardTarget()">
+        <option value="member">單一會員</option>
+        <option value="level">依會員等級批次發放</option>
+      </select>
+    </div>
+
+    <div class="search-field" id="reward-target-member">
       <label>會員</label>
-      <select name="member_id" required>
+      <select name="member_id">
         <option value="">選擇會員</option>
         {% for member in members %}
         <option value="{{ member.member_id }}">{{ member.customer_name }}｜{{ member.member_level }}</option>
         {% endfor %}
       </select>
     </div>
+
+    <div class="search-field" id="reward-target-level" style="display:none">
+      <label>會員等級</label>
+      <select name="member_level">
+        <option value="">選擇會員等級</option>
+        {% for level in member_levels %}
+        <option value="{{ level.member_level }}">{{ level.member_level }}（{{ level.member_count }} 位）</option>
+        {% endfor %}
+      </select>
+    </div>
+
     <div class="search-field">
       <label>優惠券</label>
       <select name="coupon_id" required>
@@ -82,14 +228,22 @@
         {% endfor %}
       </select>
     </div>
+
     <div class="search-field">
       <label>到期日</label>
       <input type="date" name="expires_at">
     </div>
+
     <div class="search-field">
       <label>發放原因</label>
       <input type="text" name="issued_reason" maxlength="255">
     </div>
+
+    <label class="reward-check">
+      <input type="checkbox" name="skip_existing" value="1" checked>
+      <span>已有同方案未使用券時跳過，避免重複發放</span>
+    </label>
+
     <div class="reward-form-action">
       <button class="search-button" type="submit"><i class="bi bi-send"></i><span>發放</span></button>
     </div>
@@ -102,16 +256,33 @@
     {% if coupon_templates %}
     <div class="reward-table-wrap">
       <table class="reward-table">
-        <thead><tr><th>名稱</th><th>狀態</th><th></th></tr></thead>
+        <thead><tr><th>名稱</th><th>核銷規則</th><th>狀態</th><th>操作</th></tr></thead>
         <tbody>
         {% for coupon in coupon_templates %}
         <tr>
-          <td><strong>{{ coupon.coupon_name }}</strong>{% if coupon.description %}<small>{{ coupon.description }}</small>{% endif %}</td>
+          <td>
+            <strong>{{ coupon.coupon_name }}</strong>
+            {% if coupon.description %}<small>{{ coupon.description }}</small>{% endif %}
+          </td>
+          <td>
+            {% if coupon.effect_type == 'service_fee_free' %}
+              手續費全免
+            {% elif coupon.effect_type == 'service_fee_discount' %}
+              手續費折抵 NT$ {{ coupon.effect_value }}
+            {% else %}
+              核銷時決定
+            {% endif %}
+          </td>
           <td><span class="reward-status {{ 'unused' if coupon.is_active else 'cancelled' }}">{{ '啟用' if coupon.is_active else '停用' }}</span></td>
           <td>
-            <form method="post" action="/rewards/coupons/templates/{{ coupon.coupon_id }}/toggle">
-              <button class="reward-small-button" type="submit">{{ '停用' if coupon.is_active else '啟用' }}</button>
-            </form>
+            <div class="reward-row-actions">
+              <form method="post" action="/rewards/coupons/templates/{{ coupon.coupon_id }}/toggle">
+                <button class="reward-small-button" type="submit">{{ '停用' if coupon.is_active else '啟用' }}</button>
+              </form>
+              <form method="post" action="/rewards/coupons/templates/{{ coupon.coupon_id }}/delete" onsubmit="return confirm('確定刪除「{{ coupon.coupon_name }}」方案嗎？既有已發放優惠券會保留。')">
+                <button class="reward-small-button reward-delete-button" type="submit"><i class="bi bi-trash3"></i> 刪除</button>
+              </form>
+            </div>
           </td>
         </tr>
         {% endfor %}
@@ -126,21 +297,41 @@
     {% if issued_coupons %}
     <div class="reward-table-wrap">
       <table class="reward-table">
-        <thead><tr><th>會員</th><th>優惠券</th><th>狀態</th><th></th></tr></thead>
+        <thead><tr><th>會員</th><th>優惠券</th><th>狀態</th><th>核銷訂單</th><th>操作</th></tr></thead>
         <tbody>
         {% for item in issued_coupons %}
         <tr>
-          <td>{{ item.customer_name or '—' }}</td>
+          <td>
+            {{ item.customer_name or '—' }}
+            {% if item.member_level %}<small>{{ item.member_level }}</small>{% endif %}
+          </td>
           <td><strong>{{ item.coupon_name or '—' }}</strong><small>{{ item.issued_at }}</small></td>
           <td><span class="reward-status {{ item.status }}">{{ '未使用' if item.status == 'unused' else ('已使用' if item.status == 'used' else '已取消') }}</span></td>
           <td>
-            <form method="post" action="/rewards/coupons/{{ item.member_coupon_id }}/status">
-              <select name="status" onchange="this.form.submit()" class="reward-status-select">
-                <option value="unused" {% if item.status == 'unused' %}selected{% endif %}>未使用</option>
-                <option value="used" {% if item.status == 'used' %}selected{% endif %}>已使用</option>
-                <option value="cancelled" {% if item.status == 'cancelled' %}selected{% endif %}>已取消</option>
-              </select>
-            </form>
+            {% if item.used_order_id %}
+              <strong>#{{ item.used_order_id }}</strong>
+              <small>NT$ {{ item.service_fee_before }} → {{ item.service_fee_after }}</small>
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td>
+            {% if item.status == 'unused' %}
+              <div class="reward-row-actions">
+                <a class="reward-small-button reward-use-button" href="/rewards/coupons/{{ item.member_coupon_id }}/redeem"><i class="bi bi-check2-circle"></i> 使用</a>
+                <form method="post" action="/rewards/coupons/{{ item.member_coupon_id }}/status">
+                  <input type="hidden" name="status" value="cancelled">
+                  <button class="reward-small-button" type="submit">取消</button>
+                </form>
+              </div>
+            {% elif item.status == 'cancelled' %}
+              <form method="post" action="/rewards/coupons/{{ item.member_coupon_id }}/status">
+                <input type="hidden" name="status" value="unused">
+                <button class="reward-small-button" type="submit">恢復未使用</button>
+              </form>
+            {% else %}
+              <span class="reward-locked-text">已核銷</span>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -152,16 +343,40 @@
 </div>
 
 <section class="reward-card">
+  <div class="reward-card-head"><h2><i class="bi bi-stack"></i> 最近批次送點</h2></div>
+  {% if point_batches %}
+  <div class="reward-table-wrap">
+    <table class="reward-table">
+      <thead><tr><th>日期區段</th><th>每筆</th><th>成功</th><th>略過</th><th>原因</th><th>時間</th></tr></thead>
+      <tbody>
+      {% for batch in point_batches %}
+      <tr>
+        <td>{{ batch.start_date }} ～ {{ batch.end_date }}</td>
+        <td>+{{ batch.points_per_order }} 點</td>
+        <td>{{ batch.awarded_count }} 筆</td>
+        <td>{{ batch.skipped_count }} 筆</td>
+        <td>{{ batch.reason or '—' }}</td>
+        <td>{{ batch.created_at }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<div class="empty-state">目前沒有批次送點紀錄。</div>{% endif %}
+</section>
+
+<section class="reward-card">
   <div class="reward-card-head"><h2><i class="bi bi-list-ul"></i> 最近點數紀錄</h2></div>
   {% if point_logs %}
   <div class="reward-table-wrap">
     <table class="reward-table">
-      <thead><tr><th>會員</th><th>異動</th><th>異動前</th><th>異動後</th><th>原因</th><th>時間</th></tr></thead>
+      <thead><tr><th>會員</th><th>異動</th><th>訂單</th><th>異動前</th><th>異動後</th><th>原因</th><th>時間</th></tr></thead>
       <tbody>
       {% for item in point_logs %}
       <tr>
         <td>{{ item.customer_name or '—' }}</td>
         <td class="{{ 'reward-positive' if item.change_amount > 0 else 'reward-negative' }}">{{ '+' if item.change_amount > 0 else '' }}{{ item.change_amount }}</td>
+        <td>{% if item.source_order_id %}#{{ item.source_order_id }}{% else %}—{% endif %}</td>
         <td>{{ item.balance_before }}</td>
         <td>{{ item.balance_after }}</td>
         <td>{{ item.reason or '—' }}</td>
@@ -173,4 +388,54 @@
   </div>
   {% else %}<div class="empty-state">目前沒有點數異動紀錄。</div>{% endif %}
 </section>
+
+<script>
+function toggleRewardTarget() {
+  const type = document.getElementById('reward-target-type')?.value || 'member';
+  const member = document.getElementById('reward-target-member');
+  const level = document.getElementById('reward-target-level');
+  if (member) member.style.display = type === 'member' ? '' : 'none';
+  if (level) level.style.display = type === 'level' ? '' : 'none';
+}
+
+function toggleRewardEffectValue() {
+  const type = document.getElementById('reward-effect-type')?.value || 'manual';
+  const value = document.getElementById('reward-effect-value-wrap');
+  if (value) value.style.display = type === 'service_fee_discount' ? '' : 'none';
+}
+
+function updateRewardSelectedOrderCount() {
+  const selected = document.querySelectorAll('.reward-order-checkbox:checked').length;
+  const target = document.getElementById('reward-selected-order-count');
+  if (target) target.textContent = selected ? `已選擇 ${selected} 筆訂單` : '尚未選擇訂單';
+}
+
+function toggleRewardOrderSelection(checked) {
+  document.querySelectorAll('.reward-order-checkbox').forEach((box) => {
+    box.checked = checked;
+  });
+  updateRewardSelectedOrderCount();
+}
+
+function confirmRewardPointBatch() {
+  const selected = document.querySelectorAll('.reward-order-checkbox:checked').length;
+  if (!selected) {
+    alert('請至少勾選一筆訂單');
+    return false;
+  }
+
+  const pointsInput = document.querySelector('#reward-point-batch-form input[name="points_per_order"]');
+  const points = pointsInput ? pointsInput.value : '1';
+  return confirm(`確定要對 ${selected} 筆訂單，每筆加 ${points} 點嗎？`);
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  toggleRewardTarget();
+  toggleRewardEffectValue();
+  document.querySelectorAll('.reward-order-checkbox').forEach((box) => {
+    box.addEventListener('change', updateRewardSelectedOrderCount);
+  });
+  updateRewardSelectedOrderCount();
+});
+</script>
 {% endblock %}

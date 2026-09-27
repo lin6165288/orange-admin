@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}核銷優惠券｜橘貓代購{% endblock %}
+{% block content %}
+<div class="page-header reward-redeem-header">
+  <div>
+    <a class="reward-back-link" href="/rewards"><i class="bi bi-arrow-left"></i> 回優惠券與點數</a>
+    <h1><span class="page-title-icon"><i class="bi bi-ticket-perforated"></i></span>核銷優惠券</h1>
+  </div>
+</div>
+
+<section class="reward-card reward-redeem-summary">
+  <div class="reward-redeem-title">
+    <div>
+      <span>會員</span>
+      <strong>{{ coupon.customer_name or '—' }}</strong>
+      <small>{{ coupon.member_level or '一般會員' }}</small>
+    </div>
+    <div>
+      <span>優惠券</span>
+      <strong>{{ coupon.coupon_name or '—' }}</strong>
+      {% if coupon.description %}<small>{{ coupon.description }}</small>{% endif %}
+    </div>
+    <div>
+      <span>核銷規則</span>
+      <strong>
+        {% if coupon.effect_type == 'service_fee_free' %}
+          手續費全免
+        {% elif coupon.effect_type == 'service_fee_discount' %}
+          手續費折抵 NT$ {{ coupon.effect_value }}
+        {% else %}
+          核銷時決定
+        {% endif %}
+      </strong>
+      {% if coupon.expires_at %}<small>到期：{{ coupon.expires_at }}</small>{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="reward-card">
+  <h2><i class="bi bi-receipt"></i> 選擇要套用的訂單</h2>
+
+  {% if orders %}
+  <form method="post" action="/rewards/coupons/{{ coupon.member_coupon_id }}/redeem" id="reward-redeem-form">
+    <div class="reward-order-list">
+      {% for order in orders %}
+      <label class="reward-order-option">
+        <input type="radio" name="order_id" value="{{ order.order_id }}" required>
+        <span class="reward-order-main">
+          <strong>#{{ order.order_id }}</strong>
+          <span>{{ order.order_time or '—' }}｜{{ order.platform or '—' }}</span>
+          <small>{{ order.tracking_number or '尚無單號' }}</small>
+        </span>
+        <span class="reward-order-fee">
+          <small>目前手續費</small>
+          <strong>NT$ {{ order.service_fee or 0 }}</strong>
+        </span>
+        <span class="reward-order-status">
+          {% if order.is_returned %}
+            已運回
+          {% elif order.is_arrived %}
+            已到倉
+          {% elif order.tracking_number %}
+            運送中
+          {% else %}
+            未出貨
+          {% endif %}
+        </span>
+      </label>
+      {% endfor %}
+    </div>
+
+    {% if coupon.effect_type == 'manual' or not coupon.effect_type %}
+    <div class="reward-redeem-controls">
+      <div class="search-field">
+        <label>這張優惠券如何套用</label>
+        <select name="redemption_action" id="redemption-action" onchange="toggleRedemptionValue()" required>
+          <option value="">選擇核銷方式</option>
+          <option value="service_fee_free">手續費全免</option>
+          <option value="service_fee_discount">手續費折抵固定金額</option>
+          <option value="record_only">只記錄使用，不調整手續費</option>
+        </select>
+      </div>
+      <div class="search-field" id="redemption-value-wrap" style="display:none">
+        <label>折抵金額（NT$）</label>
+        <input type="number" name="redemption_value" min="0" step="0.01" placeholder="例如 30">
+      </div>
+    </div>
+    {% else %}
+      <input type="hidden" name="redemption_action" value="{{ coupon.effect_type }}">
+    {% endif %}
+
+    <div class="search-field reward-redeem-note">
+      <label>核銷備註（可選）</label>
+      <input type="text" name="redemption_note" maxlength="255" placeholder="例如：9 月 VIP 首單">
+    </div>
+
+    <div class="reward-redeem-warning">
+      <i class="bi bi-info-circle"></i>
+      <span>核銷後會直接更新所選訂單的手續費；利潤報表會使用更新後的手續費計算。</span>
+    </div>
+
+    <div class="reward-redeem-actions">
+      <a class="clear-filter-button" href="/rewards">取消</a>
+      <button class="search-button" type="submit" onclick="return confirm('確定核銷這張優惠券並更新訂單手續費嗎？')">
+        <i class="bi bi-check2-circle"></i><span>確認核銷</span>
+      </button>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty-state">目前找不到此會員可選擇的訂單。</div>
+  {% endif %}
+</section>
+
+<script>
+function toggleRedemptionValue() {
+  const action = document.getElementById('redemption-action')?.value || '';
+  const wrap = document.getElementById('redemption-value-wrap');
+  if (wrap) wrap.style.display = action === 'service_fee_discount' ? '' : 'none';
+}
+document.addEventListener('DOMContentLoaded', toggleRedemptionValue);
+</script>
+{% endblock %}
