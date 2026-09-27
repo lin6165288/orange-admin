@@ -3596,20 +3596,28 @@ def member_edit_save(
 
 
 # =========================================================
-# 優惠券 / 點數（基礎管理）
+# 優惠券 / 點數
 # =========================================================
 
 REWARD_COUPON_STATUSES = ("unused", "used", "cancelled")
+REWARD_EFFECT_TYPES = ("manual", "service_fee_free", "service_fee_discount")
 _reward_schema_lock = threading.Lock()
 _reward_schema_ready = False
 
 
-def ensure_rewards_tables():
-    """建立可延伸的優惠券與點數底層資料表。
+def _reward_add_column(cursor, table_name, column_name, ddl):
+    cursor.execute(f"SHOW COLUMNS FROM `{table_name}` LIKE %s", (column_name,))
+    if cursor.fetchone():
+        return
+    cursor.execute(f"ALTER TABLE `{table_name}` ADD COLUMN {ddl}")
 
-    此版只做「手動建立 / 發放 / 點數調整」；
-    會員等級自動發放、首單免手續費、續會贈券、運費補貼套用規則，
-    後續確認規則後再接，不先硬編進資料模型。
+
+def ensure_rewards_tables():
+    """優惠券 / 點數底層資料表。
+
+    優惠券方案使用軟刪除，避免刪除方案後歷史發放紀錄失去名稱。
+    已發放的優惠券可綁定指定訂單核銷，並把手續費異動寫回 orders，
+    因此利潤報表會直接使用核銷後的 service_fee。
     """
     global _reward_schema_ready
     if _reward_schema_ready:
@@ -3649,6 +3657,58 @@ def ensure_rewards_tables():
                     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
                     """
                 )
+                _reward_add_column(
+                    cursor, "member_point_logs", "source_type",
+                    "`source_type` VARCHAR(40) NULL"
+                )
+                _reward_add_column(
+                    cursor, "member_point_logs", "source_order_id",
+                    "`source_order_id` INT NULL"
+                )
+                _reward_add_column(
+                    cursor, "member_point_logs", "source_batch_id",
+                    "`source_batch_id` BIGINT NULL"
+                )
+
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS point_award_batches (
+                        batch_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        start_date DATE NOT NULL,
+                        end_date DATE NOT NULL,
+                        points_per_order INT NOT NULL,
+                        reason VARCHAR(255) NULL,
+                        allow_repeat TINYINT(1) NOT NULL DEFAULT 0,
+                        selected_count INT NOT NULL DEFAULT 0,
+                        awarded_count INT NOT NULL DEFAULT 0,
+                        skipped_count INT NOT NULL DEFAULT 0,
+                        admin_username VARCHAR(100) NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_point_batch_created (created_at)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS order_point_awards (
+                        award_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        batch_id BIGINT NOT NULL,
+                        order_id INT NOT NULL,
+                        member_id INT NOT NULL,
+                        points_awarded INT NOT NULL,
+                        is_reversed TINYINT(1) NOT NULL DEFAULT 0,
+                        reversed_at TIMESTAMP NULL,
+                        reverse_reason VARCHAR(255) NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY uk_point_batch_order (batch_id, order_id),
+                        INDEX idx_point_award_order (order_id),
+                        INDEX idx_point_award_member (member_id),
+                        INDEX idx_point_award_reversed (is_reversed)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+
                 cursor.execute(
                     """
                     CREATE TABLE IF NOT EXISTS coupon_templates (
@@ -3681,6 +3741,51 @@ def ensure_rewards_tables():
                     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
                     """
                 )
+
+                # 方案：核銷規則 + 軟刪除
+                _reward_add_column(
+                    cursor, "coupon_templates", "effect_type",
+                    "`effect_type` VARCHAR(40) NOT NULL DEFAULT 'manual'"
+                )
+                _reward_add_column(
+                    cursor, "coupon_templates", "effect_value",
+                    "`effect_value` DECIMAL(10,2) NULL"
+                )
+                _reward_add_column(
+                    cursor, "coupon_templates", "is_deleted",
+                    "`is_deleted` TINYINT(1) NOT NULL DEFAULT 0"
+                )
+
+                # 會員券：綁定訂單與核銷前後手續費
+                _reward_add_column(
+                    cursor, "member_coupons", "used_order_id",
+                    "`used_order_id` INT NULL"
+                )
+                _reward_add_column(
+                    cursor, "member_coupons", "service_fee_before",
+                    "`service_fee_before` DECIMAL(10,2) NULL"
+                )
+                _reward_add_column(
+                    cursor, "member_coupons", "service_fee_after",
+                    "`service_fee_after` DECIMAL(10,2) NULL"
+                )
+                _reward_add_column(
+                    cursor, "member_coupons", "redemption_action",
+                    "`redemption_action` VARCHAR(40) NULL"
+                )
+                _reward_add_column(
+                    cursor, "member_coupons", "redemption_value",
+                    "`redemption_value` DECIMAL(10,2) NULL"
+                )
+                _reward_add_column(
+                    cursor, "member_coupons", "redemption_note",
+                    "`redemption_note` VARCHAR(255) NULL"
+                )
+                _reward_add_column(
+                    cursor, "member_coupons", "redeemed_by",
+                    "`redeemed_by` VARCHAR(100) NULL"
+                )
+
             conn.commit()
             _reward_schema_ready = True
         except Exception:
@@ -3690,9 +3795,236 @@ def ensure_rewards_tables():
             conn.close()
 
 
-def rewards_context(message="", error=""):
+
+def reconcile_cancelled_order_points():
+    """把已取消訂單先前透過「訂單批次送點」取得的點數自動扣回。
+
+    同一訂單若曾參加多個送點批次，會逐筆扣回尚未反轉的點數紀錄。
+    """
+    ensure_rewards_tables()
+
+    conn = get_db()
+    reversed_count = 0
+    reversed_points = 0
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    opa.award_id,
+                    opa.order_id,
+                    opa.member_id,
+                    opa.points_awarded,
+                    opa.batch_id,
+                    m.customer_name
+                FROM order_point_awards opa
+                INNER JOIN orders o ON o.order_id = opa.order_id
+                LEFT JOIN members m ON m.member_id = opa.member_id
+                WHERE opa.is_reversed = 0
+                  AND COALESCE(o.order_status, '正常') = '取消'
+                ORDER BY opa.award_id ASC
+                FOR UPDATE
+                """
+            )
+            rows = cursor.fetchall()
+
+            for row in rows:
+                member_id = int(row["member_id"])
+                points = int(row["points_awarded"] or 0)
+                if points <= 0:
+                    cursor.execute(
+                        """
+                        UPDATE order_point_awards
+                        SET is_reversed = 1,
+                            reversed_at = CURRENT_TIMESTAMP,
+                            reverse_reason = '訂單取消'
+                        WHERE award_id = %s
+                        """,
+                        (row["award_id"],),
+                    )
+                    continue
+
+                cursor.execute(
+                    """
+                    INSERT IGNORE INTO member_points (member_id, balance)
+                    VALUES (%s, 0)
+                    """,
+                    (member_id,),
+                )
+                cursor.execute(
+                    """
+                    SELECT balance
+                    FROM member_points
+                    WHERE member_id = %s
+                    FOR UPDATE
+                    """,
+                    (member_id,),
+                )
+                before = int((cursor.fetchone() or {}).get("balance") or 0)
+                after = before - points
+
+                cursor.execute(
+                    """
+                    UPDATE member_points
+                    SET balance = %s
+                    WHERE member_id = %s
+                    """,
+                    (after, member_id),
+                )
+
+                cursor.execute(
+                    """
+                    INSERT INTO member_point_logs
+                    (
+                        member_id,
+                        change_amount,
+                        balance_before,
+                        balance_after,
+                        reason,
+                        admin_username,
+                        source_type,
+                        source_order_id,
+                        source_batch_id
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        member_id,
+                        -points,
+                        before,
+                        after,
+                        f"訂單 #{row['order_id']} 已取消，自動扣回訂單點數",
+                        "SYSTEM",
+                        "order_cancel_reversal",
+                        row["order_id"],
+                        row["batch_id"],
+                    ),
+                )
+
+                cursor.execute(
+                    """
+                    UPDATE order_point_awards
+                    SET is_reversed = 1,
+                        reversed_at = CURRENT_TIMESTAMP,
+                        reverse_reason = '訂單取消'
+                    WHERE award_id = %s
+                    """,
+                    (row["award_id"],),
+                )
+
+                reversed_count += 1
+                reversed_points += points
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return reversed_count, reversed_points
+
+
+def _reward_points_date_range(start_date="", end_date=""):
+    taipei_today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+
+    if not str(start_date or "").strip():
+        start_value = taipei_today.replace(day=1)
+    else:
+        try:
+            start_value = datetime.strptime(str(start_date).strip(), "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=422, detail="點數查詢起始日期格式錯誤")
+
+    if not str(end_date or "").strip():
+        end_value = taipei_today
+    else:
+        try:
+            end_value = datetime.strptime(str(end_date).strip(), "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=422, detail="點數查詢結束日期格式錯誤")
+
+    if start_value > end_value:
+        start_value, end_value = end_value, start_value
+
+    return start_value, end_value
+
+
+def load_reward_order_candidates(start_date="", end_date=""):
     ensure_rewards_tables()
     sync_members_from_orders_admin()
+
+    start_value, end_value = _reward_points_date_range(start_date, end_date)
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    o.order_id,
+                    o.order_time,
+                    o.customer_name,
+                    o.platform,
+                    o.tracking_number,
+                    o.amount_rmb,
+                    o.is_arrived,
+                    o.is_returned,
+                    o.order_status,
+                    m.member_id,
+                    m.member_level,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN opa.is_reversed = 0 THEN opa.points_awarded
+                            ELSE 0
+                        END
+                    ), 0) AS active_awarded_points
+                FROM orders o
+                LEFT JOIN members m
+                    ON m.customer_name = o.customer_name
+                LEFT JOIN order_point_awards opa
+                    ON opa.order_id = o.order_id
+                WHERE DATE(o.order_time) BETWEEN %s AND %s
+                  AND COALESCE(o.order_status, '正常') <> '取消'
+                GROUP BY
+                    o.order_id,
+                    o.order_time,
+                    o.customer_name,
+                    o.platform,
+                    o.tracking_number,
+                    o.amount_rmb,
+                    o.is_arrived,
+                    o.is_returned,
+                    o.order_status,
+                    m.member_id,
+                    m.member_level
+                ORDER BY o.order_time DESC, o.order_id DESC
+                LIMIT 1000
+                """,
+                (start_value, end_value),
+            )
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    return rows, start_value, end_value
+
+
+def rewards_context(
+    message="",
+    error="",
+    points_start_date="",
+    points_end_date="",
+):
+    ensure_rewards_tables()
+    sync_members_from_orders_admin()
+
+    reversed_count, reversed_points = reconcile_cancelled_order_points()
+    point_orders, point_start, point_end = load_reward_order_candidates(
+        points_start_date,
+        points_end_date,
+    )
 
     conn = get_db()
     try:
@@ -3702,17 +4034,41 @@ def rewards_context(message="", error=""):
                 SELECT member_id, customer_name, member_level
                 FROM members
                 ORDER BY customer_name ASC
-                LIMIT 2000
+                LIMIT 3000
                 """
             )
             members = cursor.fetchall()
 
             cursor.execute(
                 """
-                SELECT coupon_id, coupon_name, description, is_active, created_at, updated_at
+                SELECT
+                    COALESCE(NULLIF(TRIM(member_level), ''), '一般會員') AS member_level,
+                    COUNT(*) AS member_count
+                FROM members
+                GROUP BY COALESCE(NULLIF(TRIM(member_level), ''), '一般會員')
+                ORDER BY FIELD(
+                    COALESCE(NULLIF(TRIM(member_level), ''), '一般會員'),
+                    '一般會員','VIP1','VIP2','VIP3'
+                ), member_level
+                """
+            )
+            member_levels = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT
+                    coupon_id,
+                    coupon_name,
+                    description,
+                    effect_type,
+                    effect_value,
+                    is_active,
+                    created_at,
+                    updated_at
                 FROM coupon_templates
+                WHERE COALESCE(is_deleted, 0) = 0
                 ORDER BY is_active DESC, coupon_id DESC
-                LIMIT 200
+                LIMIT 300
                 """
             )
             coupons = cursor.fetchall()
@@ -3725,13 +4081,22 @@ def rewards_context(message="", error=""):
                     mc.issued_reason,
                     mc.issued_at,
                     mc.expires_at,
+                    mc.used_at,
+                    mc.used_order_id,
+                    mc.service_fee_before,
+                    mc.service_fee_after,
+                    mc.redemption_action,
+                    mc.redemption_value,
                     m.customer_name,
-                    ct.coupon_name
+                    m.member_level,
+                    ct.coupon_name,
+                    ct.effect_type,
+                    ct.effect_value
                 FROM member_coupons mc
                 LEFT JOIN members m ON m.member_id = mc.member_id
                 LEFT JOIN coupon_templates ct ON ct.coupon_id = mc.coupon_id
                 ORDER BY mc.issued_at DESC, mc.member_coupon_id DESC
-                LIMIT 100
+                LIMIT 150
                 """
             )
             issued_coupons = cursor.fetchall()
@@ -3744,15 +4109,38 @@ def rewards_context(message="", error=""):
                     l.balance_before,
                     l.balance_after,
                     l.reason,
+                    l.source_type,
+                    l.source_order_id,
+                    l.source_batch_id,
                     l.created_at,
                     m.customer_name
                 FROM member_point_logs l
                 LEFT JOIN members m ON m.member_id = l.member_id
                 ORDER BY l.created_at DESC, l.log_id DESC
-                LIMIT 100
+                LIMIT 150
                 """
             )
             point_logs = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT
+                    b.batch_id,
+                    b.start_date,
+                    b.end_date,
+                    b.points_per_order,
+                    b.reason,
+                    b.allow_repeat,
+                    b.selected_count,
+                    b.awarded_count,
+                    b.skipped_count,
+                    b.created_at
+                FROM point_award_batches b
+                ORDER BY b.batch_id DESC
+                LIMIT 50
+                """
+            )
+            point_batches = cursor.fetchall()
 
             cursor.execute("SELECT COALESCE(SUM(balance),0) AS total_points FROM member_points")
             total_points = int((cursor.fetchone() or {}).get("total_points") or 0)
@@ -3763,22 +4151,39 @@ def rewards_context(message="", error=""):
             unused_coupons = int((cursor.fetchone() or {}).get("cnt") or 0)
 
             cursor.execute(
-                "SELECT COUNT(*) AS cnt FROM coupon_templates WHERE is_active = 1"
+                """
+                SELECT COUNT(*) AS cnt
+                FROM coupon_templates
+                WHERE is_active = 1 AND COALESCE(is_deleted, 0) = 0
+                """
             )
             active_coupon_templates = int((cursor.fetchone() or {}).get("cnt") or 0)
     finally:
         conn.close()
 
+    auto_reversal_message = ""
+    if reversed_count:
+        auto_reversal_message = (
+            f"已自動處理 {reversed_count} 筆取消訂單，"
+            f"共扣回 {reversed_points} 點。"
+        )
+
     return {
         "members": members,
+        "member_levels": member_levels,
         "coupon_templates": coupons,
         "issued_coupons": issued_coupons,
         "point_logs": point_logs,
+        "point_batches": point_batches,
+        "point_orders": point_orders,
+        "points_start_date": point_start.isoformat(),
+        "points_end_date": point_end.isoformat(),
         "total_points": total_points,
         "unused_coupons": unused_coupons,
         "active_coupon_templates": active_coupon_templates,
         "message": str(message or ""),
         "error": str(error or ""),
+        "auto_reversal_message": auto_reversal_message,
     }
 
 
@@ -3787,12 +4192,290 @@ def rewards_page(
     request: Request,
     message: str = "",
     error: str = "",
+    points_start_date: str = "",
+    points_end_date: str = "",
     admin: str = Depends(verify_admin),
 ):
     return templates.TemplateResponse(
         request=request,
         name="rewards.html",
-        context=rewards_context(message, error),
+        context=rewards_context(
+            message,
+            error,
+            points_start_date,
+            points_end_date,
+        ),
+    )
+
+
+@app.post("/rewards/points/batch-award")
+async def rewards_points_batch_award(
+    request: Request,
+    points_start_date: str = Form(""),
+    points_end_date: str = Form(""),
+    points_per_order: int = Form(1),
+    reason: str = Form(""),
+    allow_repeat: Optional[str] = Form(None),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_rewards_tables()
+    sync_members_from_orders_admin()
+    reconcile_cancelled_order_points()
+
+    if points_per_order <= 0 or points_per_order > 100000:
+        raise HTTPException(
+            status_code=422,
+            detail="每筆訂單點數必須大於 0，且不可超過 100000",
+        )
+
+    start_value, end_value = _reward_points_date_range(
+        points_start_date,
+        points_end_date,
+    )
+    reason_value = str(reason or "").strip()[:255]
+    allow_repeat_value = allow_repeat is not None
+
+    form = await request.form()
+    raw_order_ids = form.getlist("order_ids")
+    selected_ids = []
+    seen = set()
+
+    for raw in raw_order_ids:
+        try:
+            oid = int(str(raw).strip())
+        except (TypeError, ValueError):
+            continue
+        if oid > 0 and oid not in seen:
+            seen.add(oid)
+            selected_ids.append(oid)
+
+    if not selected_ids:
+        return RedirectResponse(
+            url=(
+                "/rewards?"
+                + "points_start_date="
+                + quote(start_value.isoformat())
+                + "&points_end_date="
+                + quote(end_value.isoformat())
+                + "&error="
+                + quote("請至少勾選一筆訂單")
+            ),
+            status_code=303,
+        )
+
+    if len(selected_ids) > 1000:
+        raise HTTPException(status_code=422, detail="單次最多處理 1000 筆訂單")
+
+    placeholders = ",".join(["%s"] * len(selected_ids))
+
+    conn = get_db()
+    awarded_count = 0
+    skipped_count = 0
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO point_award_batches
+                (
+                    start_date,
+                    end_date,
+                    points_per_order,
+                    reason,
+                    allow_repeat,
+                    selected_count,
+                    awarded_count,
+                    skipped_count,
+                    admin_username
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,0,0,%s)
+                """,
+                (
+                    start_value,
+                    end_value,
+                    int(points_per_order),
+                    reason_value or None,
+                    int(allow_repeat_value),
+                    len(selected_ids),
+                    admin,
+                ),
+            )
+            batch_id = int(cursor.lastrowid)
+
+            cursor.execute(
+                f"""
+                SELECT
+                    o.order_id,
+                    o.order_time,
+                    o.customer_name,
+                    o.order_status,
+                    m.member_id
+                FROM orders o
+                LEFT JOIN members m ON m.customer_name = o.customer_name
+                WHERE o.order_id IN ({placeholders})
+                FOR UPDATE
+                """,
+                selected_ids,
+            )
+            order_rows = {int(row["order_id"]): row for row in cursor.fetchall()}
+
+            for order_id in selected_ids:
+                row = order_rows.get(order_id)
+
+                if not row:
+                    skipped_count += 1
+                    continue
+
+                order_date = row.get("order_time")
+                if hasattr(order_date, "date"):
+                    order_date = order_date.date()
+
+                if (
+                    not order_date
+                    or order_date < start_value
+                    or order_date > end_value
+                    or str(row.get("order_status") or "正常") == "取消"
+                ):
+                    skipped_count += 1
+                    continue
+
+                member_id = row.get("member_id")
+                if not member_id:
+                    skipped_count += 1
+                    continue
+
+                if not allow_repeat_value:
+                    cursor.execute(
+                        """
+                        SELECT 1
+                        FROM order_point_awards
+                        WHERE order_id = %s
+                          AND is_reversed = 0
+                        LIMIT 1
+                        """,
+                        (order_id,),
+                    )
+                    if cursor.fetchone():
+                        skipped_count += 1
+                        continue
+
+                member_id = int(member_id)
+
+                cursor.execute(
+                    """
+                    INSERT IGNORE INTO member_points (member_id, balance)
+                    VALUES (%s, 0)
+                    """,
+                    (member_id,),
+                )
+                cursor.execute(
+                    """
+                    SELECT balance
+                    FROM member_points
+                    WHERE member_id = %s
+                    FOR UPDATE
+                    """,
+                    (member_id,),
+                )
+                before = int((cursor.fetchone() or {}).get("balance") or 0)
+                after = before + int(points_per_order)
+
+                cursor.execute(
+                    """
+                    UPDATE member_points
+                    SET balance = %s
+                    WHERE member_id = %s
+                    """,
+                    (after, member_id),
+                )
+
+                cursor.execute(
+                    """
+                    INSERT INTO order_point_awards
+                    (
+                        batch_id,
+                        order_id,
+                        member_id,
+                        points_awarded,
+                        is_reversed
+                    )
+                    VALUES (%s,%s,%s,%s,0)
+                    """,
+                    (
+                        batch_id,
+                        order_id,
+                        member_id,
+                        int(points_per_order),
+                    ),
+                )
+
+                cursor.execute(
+                    """
+                    INSERT INTO member_point_logs
+                    (
+                        member_id,
+                        change_amount,
+                        balance_before,
+                        balance_after,
+                        reason,
+                        admin_username,
+                        source_type,
+                        source_order_id,
+                        source_batch_id
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        member_id,
+                        int(points_per_order),
+                        before,
+                        after,
+                        reason_value
+                        or f"訂單 #{order_id} 批次送點",
+                        admin,
+                        "order_award",
+                        order_id,
+                        batch_id,
+                    ),
+                )
+
+                awarded_count += 1
+
+            cursor.execute(
+                """
+                UPDATE point_award_batches
+                SET awarded_count = %s,
+                    skipped_count = %s
+                WHERE batch_id = %s
+                """,
+                (awarded_count, skipped_count, batch_id),
+            )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    msg = (
+        f"批次送點完成：成功 {awarded_count} 筆，"
+        f"略過 {skipped_count} 筆；每筆 +{points_per_order} 點"
+    )
+
+    return RedirectResponse(
+        url=(
+            "/rewards?"
+            + "points_start_date="
+            + quote(start_value.isoformat())
+            + "&points_end_date="
+            + quote(end_value.isoformat())
+            + "&message="
+            + quote(msg)
+        ),
+        status_code=303,
     )
 
 
@@ -3872,6 +4555,8 @@ def rewards_coupon_template_create(
     request: Request,
     coupon_name: str = Form(""),
     description: str = Form(""),
+    effect_type: str = Form("manual"),
+    effect_value: str = Form(""),
     admin: str = Depends(verify_admin),
 ):
     _check_same_origin(request)
@@ -3879,10 +4564,23 @@ def rewards_coupon_template_create(
 
     name = str(coupon_name or "").strip()
     desc = str(description or "").strip()
+    effect_type = str(effect_type or "manual").strip()
+
     if not name or len(name) > 120:
         raise HTTPException(status_code=422, detail="優惠券名稱不可空白，且最多 120 字")
     if len(desc) > 65535:
         raise HTTPException(status_code=422, detail="優惠券說明過長")
+    if effect_type not in REWARD_EFFECT_TYPES:
+        raise HTTPException(status_code=422, detail="優惠券核銷規則不正確")
+
+    effect_value_db = None
+    if effect_type == "service_fee_discount":
+        try:
+            effect_value_db = Decimal(str(effect_value or "0")).quantize(Decimal("0.01"))
+        except InvalidOperation:
+            raise HTTPException(status_code=422, detail="手續費折抵金額格式不正確")
+        if effect_value_db <= 0:
+            raise HTTPException(status_code=422, detail="手續費折抵金額必須大於 0")
 
     conn = get_db()
     try:
@@ -3890,10 +4588,13 @@ def rewards_coupon_template_create(
             cursor.execute(
                 """
                 INSERT INTO coupon_templates
-                    (coupon_name, description, is_active, created_by)
-                VALUES (%s,%s,1,%s)
+                    (
+                        coupon_name, description, effect_type, effect_value,
+                        is_active, is_deleted, created_by
+                    )
+                VALUES (%s,%s,%s,%s,1,0,%s)
                 """,
-                (name, desc or None, admin),
+                (name, desc or None, effect_type, effect_value_db, admin),
             )
         conn.commit()
     except Exception:
@@ -3924,7 +4625,7 @@ def rewards_coupon_template_toggle(
                 """
                 UPDATE coupon_templates
                 SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END
-                WHERE coupon_id = %s
+                WHERE coupon_id = %s AND COALESCE(is_deleted, 0) = 0
                 """,
                 (coupon_id,),
             )
@@ -3940,17 +4641,60 @@ def rewards_coupon_template_toggle(
     return RedirectResponse(url="/rewards", status_code=303)
 
 
+@app.post("/rewards/coupons/templates/{coupon_id}/delete")
+def rewards_coupon_template_delete(
+    request: Request,
+    coupon_id: int,
+    admin: str = Depends(verify_admin),
+):
+    """方案採軟刪除，歷史已發放優惠券仍保留名稱與核銷能力。"""
+    _check_same_origin(request)
+    ensure_rewards_tables()
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE coupon_templates
+                SET is_deleted = 1, is_active = 0
+                WHERE coupon_id = %s AND COALESCE(is_deleted, 0) = 0
+                """,
+                (coupon_id,),
+            )
+            if cursor.rowcount != 1:
+                raise HTTPException(status_code=404, detail="找不到優惠券方案")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return RedirectResponse(
+        url="/rewards?message=" + quote("優惠券方案已刪除；既有發放紀錄仍保留"),
+        status_code=303,
+    )
+
+
 @app.post("/rewards/coupons/issue")
 def rewards_coupon_issue(
     request: Request,
-    member_id: int = Form(...),
+    target_type: str = Form("member"),
+    member_id: str = Form(""),
+    member_level: str = Form(""),
     coupon_id: int = Form(...),
     expires_at: str = Form(""),
     issued_reason: str = Form(""),
+    skip_existing: Optional[str] = Form(None),
     admin: str = Depends(verify_admin),
 ):
     _check_same_origin(request)
     ensure_rewards_tables()
+
+    target_type = str(target_type or "member").strip()
+    if target_type not in ("member", "level"):
+        raise HTTPException(status_code=422, detail="發放對象不正確")
 
     expiry_value = None
     if str(expires_at or "").strip():
@@ -3960,21 +4704,18 @@ def rewards_coupon_issue(
             raise HTTPException(status_code=422, detail="優惠券到期日格式錯誤")
 
     reason = str(issued_reason or "").strip()[:255]
+    skip_dup = skip_existing is not None
+
     conn = get_db()
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "SELECT member_id FROM members WHERE member_id = %s LIMIT 1",
-                (member_id,),
-            )
-            if not cursor.fetchone():
-                raise HTTPException(status_code=404, detail="找不到會員")
-
-            cursor.execute(
                 """
                 SELECT coupon_id
                 FROM coupon_templates
-                WHERE coupon_id = %s AND is_active = 1
+                WHERE coupon_id = %s
+                  AND is_active = 1
+                  AND COALESCE(is_deleted, 0) = 0
                 LIMIT 1
                 """,
                 (coupon_id,),
@@ -3982,14 +4723,108 @@ def rewards_coupon_issue(
             if not cursor.fetchone():
                 raise HTTPException(status_code=404, detail="找不到可發放的優惠券")
 
-            cursor.execute(
+            if target_type == "member":
+                try:
+                    member_id_value = int(str(member_id or "").strip())
+                except ValueError:
+                    raise HTTPException(status_code=422, detail="請選擇會員")
+
+                cursor.execute(
+                    "SELECT member_id FROM members WHERE member_id = %s LIMIT 1",
+                    (member_id_value,),
+                )
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=404, detail="找不到會員")
+
+                if skip_dup:
+                    cursor.execute(
+                        """
+                        SELECT 1
+                        FROM member_coupons
+                        WHERE member_id = %s
+                          AND coupon_id = %s
+                          AND status = 'unused'
+                        LIMIT 1
+                        """,
+                        (member_id_value, coupon_id),
+                    )
+                    if cursor.fetchone():
+                        return RedirectResponse(
+                            url="/rewards?error=" + quote("該會員已有同方案的未使用優惠券，未重複發放"),
+                            status_code=303,
+                        )
+
+                cursor.execute(
+                    """
+                    INSERT INTO member_coupons
+                        (coupon_id, member_id, status, issued_reason, issued_by, expires_at)
+                    VALUES (%s,%s,'unused',%s,%s,%s)
+                    """,
+                    (coupon_id, member_id_value, reason or None, admin, expiry_value),
+                )
+                issued_count = 1
+                skipped_count = 0
+
+            else:
+                level = str(member_level or "").strip()
+                if not level:
+                    raise HTTPException(status_code=422, detail="請選擇會員等級")
+
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM members
+                    WHERE COALESCE(NULLIF(TRIM(member_level), ''), '一般會員') = %s
+                    """,
+                    (level,),
+                )
+                target_count = int((cursor.fetchone() or {}).get("cnt") or 0)
+                if target_count <= 0:
+                    return RedirectResponse(
+                        url="/rewards?error=" + quote("此會員等級目前沒有會員"),
+                        status_code=303,
+                    )
+
+                duplicate_clause = ""
+                duplicate_params = []
+                if skip_dup:
+                    duplicate_clause = """
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM member_coupons existing
+                        WHERE existing.member_id = m.member_id
+                          AND existing.coupon_id = %s
+                          AND existing.status = 'unused'
+                    )
+                    """
+                    duplicate_params.append(coupon_id)
+
+                sql = f"""
+                    INSERT INTO member_coupons
+                        (coupon_id, member_id, status, issued_reason, issued_by, expires_at)
+                    SELECT
+                        %s,
+                        m.member_id,
+                        'unused',
+                        %s,
+                        %s,
+                        %s
+                    FROM members m
+                    WHERE COALESCE(NULLIF(TRIM(m.member_level), ''), '一般會員') = %s
+                    {duplicate_clause}
                 """
-                INSERT INTO member_coupons
-                    (coupon_id, member_id, status, issued_reason, issued_by, expires_at)
-                VALUES (%s,%s,'unused',%s,%s,%s)
-                """,
-                (coupon_id, member_id, reason or None, admin, expiry_value),
-            )
+                params = [
+                    coupon_id,
+                    reason or None,
+                    admin,
+                    expiry_value,
+                    level,
+                    *duplicate_params,
+                ]
+                cursor.execute(sql, params)
+                issued_count = int(cursor.rowcount or 0)
+                skipped_count = max(0, target_count - issued_count)
+
         conn.commit()
     except Exception:
         conn.rollback()
@@ -3997,8 +4832,251 @@ def rewards_coupon_issue(
     finally:
         conn.close()
 
+    if target_type == "level":
+        msg = f"已依會員等級批次發放 {issued_count} 張"
+        if skipped_count:
+            msg += f"，略過 {skipped_count} 位已有未使用同方案優惠券的會員"
+    else:
+        msg = "優惠券已發放"
+
     return RedirectResponse(
-        url="/rewards?message=" + quote("優惠券已發放"),
+        url="/rewards?message=" + quote(msg),
+        status_code=303,
+    )
+
+
+def _reward_coupon_for_redeem(cursor, member_coupon_id, lock=False):
+    lock_sql = " FOR UPDATE" if lock else ""
+    cursor.execute(
+        f"""
+        SELECT
+            mc.member_coupon_id,
+            mc.coupon_id,
+            mc.member_id,
+            mc.status,
+            mc.expires_at,
+            mc.used_at,
+            mc.used_order_id,
+            mc.service_fee_before,
+            mc.service_fee_after,
+            m.customer_name,
+            m.member_level,
+            ct.coupon_name,
+            ct.description,
+            ct.effect_type,
+            ct.effect_value
+        FROM member_coupons mc
+        LEFT JOIN members m ON m.member_id = mc.member_id
+        LEFT JOIN coupon_templates ct ON ct.coupon_id = mc.coupon_id
+        WHERE mc.member_coupon_id = %s
+        LIMIT 1
+        {lock_sql}
+        """,
+        (member_coupon_id,),
+    )
+    return cursor.fetchone()
+
+
+@app.get("/rewards/coupons/{member_coupon_id}/redeem")
+def rewards_coupon_redeem_page(
+    request: Request,
+    member_coupon_id: int,
+    admin: str = Depends(verify_admin),
+):
+    ensure_rewards_tables()
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            coupon = _reward_coupon_for_redeem(cursor, member_coupon_id)
+            if not coupon:
+                raise HTTPException(status_code=404, detail="找不到會員優惠券")
+            if coupon.get("status") != "unused":
+                return RedirectResponse(
+                    url="/rewards?error=" + quote("只有未使用優惠券可以核銷"),
+                    status_code=303,
+                )
+
+            cursor.execute(
+                """
+                SELECT
+                    order_id,
+                    order_time,
+                    platform,
+                    tracking_number,
+                    amount_rmb,
+                    service_fee,
+                    is_arrived,
+                    is_returned,
+                    order_status
+                FROM orders
+                WHERE customer_name = %s
+                  AND COALESCE(order_status, '正常') <> '取消'
+                ORDER BY order_id DESC
+                LIMIT 200
+                """,
+                (coupon.get("customer_name") or "",),
+            )
+            orders = cursor.fetchall()
+    finally:
+        conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="reward_redeem.html",
+        context={
+            "coupon": coupon,
+            "orders": orders,
+        },
+    )
+
+
+@app.post("/rewards/coupons/{member_coupon_id}/redeem")
+def rewards_coupon_redeem(
+    request: Request,
+    member_coupon_id: int,
+    order_id: int = Form(...),
+    redemption_action: str = Form(""),
+    redemption_value: str = Form(""),
+    redemption_note: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_rewards_tables()
+    ensure_audit_storage()
+
+    note = str(redemption_note or "").strip()[:255]
+    today_tw = datetime.now(ZoneInfo("Asia/Taipei")).date()
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            coupon = _reward_coupon_for_redeem(cursor, member_coupon_id, lock=True)
+            if not coupon:
+                raise HTTPException(status_code=404, detail="找不到會員優惠券")
+            if coupon.get("status") != "unused":
+                raise HTTPException(status_code=409, detail="此優惠券已不是未使用狀態")
+
+            expires_at = coupon.get("expires_at")
+            if expires_at and expires_at < today_tw:
+                raise HTTPException(status_code=409, detail="此優惠券已過期")
+
+            customer_name = str(coupon.get("customer_name") or "")
+            cursor.execute(
+                """
+                SELECT *
+                FROM orders
+                WHERE order_id = %s
+                  AND customer_name = %s
+                  AND COALESCE(order_status, '正常') <> '取消'
+                FOR UPDATE
+                """,
+                (order_id, customer_name),
+            )
+            before_order = cursor.fetchone()
+            if not before_order:
+                raise HTTPException(status_code=404, detail="找不到該會員的指定訂單")
+
+            old_fee = Decimal(str(before_order.get("service_fee") or 0)).quantize(Decimal("0.01"))
+            effect_type = str(coupon.get("effect_type") or "manual")
+            effect_value = coupon.get("effect_value")
+
+            action = effect_type
+            applied_value = None
+
+            if effect_type == "service_fee_free":
+                new_fee = Decimal("0.00")
+                applied_value = old_fee
+
+            elif effect_type == "service_fee_discount":
+                discount = Decimal(str(effect_value or 0)).quantize(Decimal("0.01"))
+                if discount <= 0:
+                    raise HTTPException(status_code=422, detail="此優惠券的手續費折抵金額未設定")
+                new_fee = max(Decimal("0.00"), old_fee - discount)
+                applied_value = discount
+
+            else:
+                action = str(redemption_action or "").strip()
+                if action == "service_fee_free":
+                    new_fee = Decimal("0.00")
+                    applied_value = old_fee
+                elif action == "service_fee_discount":
+                    try:
+                        discount = Decimal(str(redemption_value or "0")).quantize(Decimal("0.01"))
+                    except InvalidOperation:
+                        raise HTTPException(status_code=422, detail="手續費折抵金額格式不正確")
+                    if discount <= 0:
+                        raise HTTPException(status_code=422, detail="手續費折抵金額必須大於 0")
+                    new_fee = max(Decimal("0.00"), old_fee - discount)
+                    applied_value = discount
+                elif action == "record_only":
+                    new_fee = old_fee
+                    applied_value = None
+                else:
+                    raise HTTPException(status_code=422, detail="請選擇優惠券核銷方式")
+
+            # service_fee 是利潤報表的手續費收入來源。
+            # 同步 final_service_fee，保留 original_service_fee 作為原始值。
+            cursor.execute(
+                """
+                UPDATE orders
+                SET service_fee = %s,
+                    final_service_fee = %s
+                WHERE order_id = %s
+                """,
+                (new_fee, new_fee, order_id),
+            )
+
+            after_order = fetch_locked_order(cursor, order_id)
+
+            cursor.execute(
+                """
+                UPDATE member_coupons
+                SET status = 'used',
+                    used_at = CURRENT_TIMESTAMP,
+                    used_order_id = %s,
+                    service_fee_before = %s,
+                    service_fee_after = %s,
+                    redemption_action = %s,
+                    redemption_value = %s,
+                    redemption_note = %s,
+                    redeemed_by = %s
+                WHERE member_coupon_id = %s
+                """,
+                (
+                    order_id,
+                    old_fee,
+                    new_fee,
+                    action,
+                    applied_value,
+                    note or None,
+                    admin,
+                    member_coupon_id,
+                ),
+            )
+
+            write_audit_log(
+                cursor,
+                order_id,
+                "UPDATE",
+                admin,
+                before_order,
+                after_order,
+            )
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    msg = (
+        f"優惠券核銷完成：訂單 #{order_id} 手續費 "
+        f"NT$ {old_fee:.2f} → NT$ {new_fee:.2f}"
+    )
+    return RedirectResponse(
+        url="/rewards?message=" + quote(msg),
         status_code=303,
     )
 
@@ -4010,9 +5088,16 @@ def rewards_coupon_status(
     status: str = Form("unused"),
     admin: str = Depends(verify_admin),
 ):
+    """只有未使用 / 已取消可互轉；「已使用」必須走核銷流程。"""
     _check_same_origin(request)
     ensure_rewards_tables()
-    if status not in REWARD_COUPON_STATUSES:
+
+    if status == "used":
+        return RedirectResponse(
+            url=f"/rewards/coupons/{member_coupon_id}/redeem",
+            status_code=303,
+        )
+    if status not in ("unused", "cancelled"):
         raise HTTPException(status_code=422, detail="優惠券狀態不正確")
 
     conn = get_db()
@@ -4020,15 +5105,31 @@ def rewards_coupon_status(
         with conn.cursor() as cursor:
             cursor.execute(
                 """
+                SELECT status
+                FROM member_coupons
+                WHERE member_coupon_id = %s
+                FOR UPDATE
+                """,
+                (member_coupon_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="找不到會員優惠券")
+            if row.get("status") == "used":
+                return RedirectResponse(
+                    url="/rewards?error=" + quote("已核銷優惠券不可直接改回其他狀態"),
+                    status_code=303,
+                )
+
+            cursor.execute(
+                """
                 UPDATE member_coupons
                 SET status = %s,
-                    used_at = CASE WHEN %s = 'used' THEN CURRENT_TIMESTAMP ELSE NULL END
+                    used_at = NULL
                 WHERE member_coupon_id = %s
                 """,
-                (status, status, member_coupon_id),
+                (status, member_coupon_id),
             )
-            if cursor.rowcount != 1:
-                raise HTTPException(status_code=404, detail="找不到會員優惠券")
         conn.commit()
     except Exception:
         conn.rollback()
