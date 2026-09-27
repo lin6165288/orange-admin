@@ -4077,14 +4077,23 @@ def rewards_context(
             cursor.execute(
                 """
                 SELECT
-                    COALESCE(NULLIF(TRIM(member_level), ''), '一般會員') AS member_level,
+                    normalized.member_level,
                     COUNT(*) AS member_count
-                FROM members
-                GROUP BY COALESCE(NULLIF(TRIM(member_level), ''), '一般會員')
-                ORDER BY FIELD(
-                    COALESCE(NULLIF(TRIM(member_level), ''), '一般會員'),
-                    '一般會員','VIP1','VIP2','VIP3'
-                ), member_level
+                FROM (
+                    SELECT
+                        COALESCE(
+                            NULLIF(TRIM(member_level), ''),
+                            '一般會員'
+                        ) AS member_level
+                    FROM members
+                ) AS normalized
+                GROUP BY normalized.member_level
+                ORDER BY
+                    FIELD(
+                        normalized.member_level,
+                        '一般會員','VIP1','VIP2','VIP3'
+                    ),
+                    normalized.member_level
                 """
             )
             member_levels = cursor.fetchall()
