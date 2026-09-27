@@ -157,6 +157,81 @@ def get_db():
 
 
 # =========================================================
+# 訂單採購付款方式 / 實際成本
+# =========================================================
+
+_order_cost_schema_lock = threading.Lock()
+_order_cost_schema_ready = False
+
+
+def ensure_order_cost_columns():
+    """補上供利潤報表使用的採購付款方式與刷卡實際成本欄位。
+
+    舊訂單欄位為 NULL 時，系統一律視為「支付寶」，以維持既有資料相容。
+    """
+    global _order_cost_schema_ready
+    if _order_cost_schema_ready:
+        return
+
+    with _order_cost_schema_lock:
+        if _order_cost_schema_ready:
+            return
+
+        conn = get_db()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SHOW COLUMNS FROM orders")
+                existing = {row["Field"] for row in cursor.fetchall()}
+
+                if "purchase_payment_method" not in existing:
+                    cursor.execute(
+                        """
+                        ALTER TABLE orders
+                        ADD COLUMN purchase_payment_method VARCHAR(20) NULL
+                        """
+                    )
+
+                if "card_cost_twd" not in existing:
+                    cursor.execute(
+                        """
+                        ALTER TABLE orders
+                        ADD COLUMN card_cost_twd DECIMAL(12,2) NULL
+                        """
+                    )
+            conn.commit()
+            _order_cost_schema_ready = True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def normalize_purchase_payment_method(value) -> str:
+    method = str(value or "").strip().lower()
+    return "card" if method == "card" else "alipay"
+
+
+def parse_card_cost(value, *, amount_rmb=None, required=False):
+    raw = str(value or "").strip()
+    if not raw:
+        if required:
+            raise HTTPException(status_code=422, detail="刷卡付款請輸入刷卡金額")
+        return None
+    try:
+        cost = Decimal(raw)
+    except InvalidOperation:
+        raise HTTPException(status_code=422, detail="刷卡金額格式不正確")
+    if not cost.is_finite() or cost < 0 or cost > Decimal("999999999.99"):
+        raise HTTPException(status_code=422, detail="刷卡金額超出可接受範圍")
+    if cost.as_tuple().exponent < -2:
+        raise HTTPException(status_code=422, detail="刷卡金額最多兩位小數")
+    if required and amount_rmb is not None and Decimal(str(amount_rmb or 0)) > 0 and cost <= 0:
+        raise HTTPException(status_code=422, detail="刷卡付款的刷卡金額必須大於 0")
+    return cost.quantize(Decimal("0.01"))
+
+
+# =========================================================
 # Fetch Single Order
 # =========================================================
 
@@ -164,6 +239,7 @@ def fetch_order(
     order_id: int
 ):
 
+    ensure_order_cost_columns()
     conn = get_db()
 
     try:
@@ -179,6 +255,8 @@ def fetch_order(
                     platform,
                     tracking_number,
                     amount_rmb,
+                    purchase_payment_method,
+                    card_cost_twd,
                     weight_kg,
                     is_arrived,
                     is_returned,
@@ -1116,6 +1194,10 @@ async def update_order(
 
     amount_rmb: str = Form(""),
 
+    purchase_payment_method: str = Form("alipay"),
+
+    card_cost_twd: str = Form(""),
+
     weight_kg: str = Form(""),
 
     remarks: str = Form(""),
@@ -1304,6 +1386,27 @@ async def update_order(
 
 
     # =====================================================
+    # 採購付款方式 / 實際刷卡成本
+    # =====================================================
+
+    purchase_method_value = normalize_purchase_payment_method(
+        purchase_payment_method
+    )
+
+    try:
+        card_cost_value = parse_card_cost(
+            card_cost_twd,
+            amount_rmb=amount_value or Decimal("0"),
+            required=(purchase_method_value == "card"),
+        )
+    except HTTPException as exc:
+        raise HTTPException(status_code=400, detail=exc.detail)
+
+    if purchase_method_value == "alipay":
+        card_cost_value = None
+
+
+    # =====================================================
     # Checkboxes
     # =====================================================
 
@@ -1347,6 +1450,7 @@ async def update_order(
     # Transaction
     # =====================================================
 
+    ensure_order_cost_columns()
     ensure_audit_storage()
 
     conn = get_db()
@@ -1372,6 +1476,8 @@ async def update_order(
                     platform = %s,
                     tracking_number = %s,
                     amount_rmb = %s,
+                    purchase_payment_method = %s,
+                    card_cost_twd = %s,
                     weight_kg = %s,
                     remarks = %s,
                     is_arrived = %s,
@@ -1386,6 +1492,8 @@ async def update_order(
                     platform_value,
                     tracking_value,
                     amount_value,
+                    purchase_method_value,
+                    card_cost_value,
                     weight_value,
                     remarks_value,
                     arrived_value,
@@ -1940,6 +2048,8 @@ def add_order_context(**updates):
         "platform": "集運",
         "tracking_number": "",
         "amount_rmb": "0.00",
+        "purchase_payment_method": "alipay",
+        "card_cost_twd": "",
         "weight_kg": "0.00",
         "is_arrived": False,
         "is_returned": False,
@@ -1953,6 +2063,7 @@ def add_order_context(**updates):
 
 
 def new_order_page_context(**updates):
+    ensure_order_cost_columns()
     context = add_order_context(**updates)
     conn = get_db()
     try:
@@ -2036,6 +2147,8 @@ def create_order(
     platform: str = Form("集運"),
     tracking_number: str = Form(""),
     amount_rmb: str = Form("0"),
+    purchase_payment_method: str = Form("alipay"),
+    card_cost_twd: str = Form(""),
     weight_kg: str = Form("0"),
     is_arrived: Optional[str] = Form(None),
     is_returned: Optional[str] = Form(None),
@@ -2048,8 +2161,11 @@ def create_order(
     tracking = tracking_number.strip()
     notes = remarks.strip()
     keep_name = keep_last_name == "1"
+    purchase_method = normalize_purchase_payment_method(purchase_payment_method)
     inputs = dict(order_time=order_time, customer_name=name, platform=platform,
                   tracking_number=tracking, amount_rmb=amount_rmb,
+                  purchase_payment_method=purchase_method,
+                  card_cost_twd=card_cost_twd,
                   weight_kg=weight_kg, is_arrived=is_arrived == "1",
                   is_returned=is_returned == "1", remarks=remarks,
                   keep_last_name=keep_name)
@@ -2076,10 +2192,19 @@ def create_order(
     try:
         amount = valid_add_amount(amount_rmb, "人民幣金額", "99999999.99")
         weight = valid_add_amount(weight_kg, "重量", "99999999.99")
+        card_cost = parse_card_cost(
+            card_cost_twd,
+            amount_rmb=amount,
+            required=(purchase_method == "card"),
+        )
     except HTTPException as exc:
         return bad(exc.detail)
 
+    if purchase_method == "alipay":
+        card_cost = None
+
     # DDL should not run in an order transaction; fail closed if auditing is unavailable.
+    ensure_order_cost_columns()
     ensure_audit_storage()
     conn = get_db()
     try:
@@ -2090,9 +2215,11 @@ def create_order(
             cursor.execute(
                 """INSERT INTO orders
                    (order_time, customer_name, platform, tracking_number,
-                    amount_rmb, weight_kg, is_arrived, is_returned, service_fee, remarks)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (date_value, name, platform, tracking or None, amount, weight,
+                    amount_rmb, purchase_payment_method, card_cost_twd,
+                    weight_kg, is_arrived, is_returned, service_fee, remarks)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (date_value, name, platform, tracking or None, amount,
+                 purchase_method, card_cost, weight,
                  int(is_arrived == "1"), int(is_returned == "1"), fee, notes or None),
             )
             new_id = cursor.lastrowid
@@ -3282,6 +3409,7 @@ def fetch_member_admin(member_id: int):
 
 
 def member_detail_context(member_id: int):
+    ensure_rewards_tables()
     member = fetch_member_admin(member_id)
     if not member:
         raise HTTPException(status_code=404, detail="找不到會員")
@@ -3312,13 +3440,46 @@ def member_detail_context(member_id: int):
                 (member["customer_name"],),
             )
             stats = cursor.fetchone() or {}
+
+            cursor.execute(
+                "SELECT balance FROM member_points WHERE member_id = %s LIMIT 1",
+                (member_id,),
+            )
+            point_row = cursor.fetchone() or {}
+            points_balance = int(point_row.get("balance") or 0)
+
+            cursor.execute(
+                """
+                SELECT
+                    mc.member_coupon_id,
+                    mc.status,
+                    mc.issued_reason,
+                    mc.issued_at,
+                    mc.expires_at,
+                    ct.coupon_name
+                FROM member_coupons mc
+                LEFT JOIN coupon_templates ct ON ct.coupon_id = mc.coupon_id
+                WHERE mc.member_id = %s
+                ORDER BY mc.issued_at DESC, mc.member_coupon_id DESC
+                LIMIT 10
+                """,
+                (member_id,),
+            )
+            member_coupons = cursor.fetchall()
     finally:
         conn.close()
     stats["order_count"] = int(stats.get("order_count") or 0)
     stats["unreturned_count"] = int(stats.get("unreturned_count") or 0)
     stats["total_weight_num"] = float(stats.get("total_weight") or 0)
     stats["total_rmb_num"] = float(stats.get("total_rmb") or 0)
-    return {"member": member, "orders": orders, "stats": stats, "member_levels": MEMBER_LEVELS}
+    return {
+        "member": member,
+        "orders": orders,
+        "stats": stats,
+        "member_levels": MEMBER_LEVELS,
+        "points_balance": points_balance,
+        "member_coupons": member_coupons,
+    }
 
 
 @app.get("/members")
@@ -3432,6 +3593,450 @@ def member_edit_save(
         name="member_detail.html",
         context={**member_detail_context(member_id), "message": "會員資料已更新。"},
     )
+
+
+# =========================================================
+# 優惠券 / 點數（基礎管理）
+# =========================================================
+
+REWARD_COUPON_STATUSES = ("unused", "used", "cancelled")
+_reward_schema_lock = threading.Lock()
+_reward_schema_ready = False
+
+
+def ensure_rewards_tables():
+    """建立可延伸的優惠券與點數底層資料表。
+
+    此版只做「手動建立 / 發放 / 點數調整」；
+    會員等級自動發放、首單免手續費、續會贈券、運費補貼套用規則，
+    後續確認規則後再接，不先硬編進資料模型。
+    """
+    global _reward_schema_ready
+    if _reward_schema_ready:
+        return
+
+    with _reward_schema_lock:
+        if _reward_schema_ready:
+            return
+
+        ensure_members_table_admin()
+        conn = get_db()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS member_points (
+                        member_id INT NOT NULL PRIMARY KEY,
+                        balance INT NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS member_point_logs (
+                        log_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        member_id INT NOT NULL,
+                        change_amount INT NOT NULL,
+                        balance_before INT NOT NULL,
+                        balance_after INT NOT NULL,
+                        reason VARCHAR(255) NULL,
+                        admin_username VARCHAR(100) NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_point_member (member_id),
+                        INDEX idx_point_created (created_at)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS coupon_templates (
+                        coupon_id INT AUTO_INCREMENT PRIMARY KEY,
+                        coupon_name VARCHAR(120) NOT NULL,
+                        description TEXT NULL,
+                        is_active TINYINT(1) NOT NULL DEFAULT 1,
+                        created_by VARCHAR(100) NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS member_coupons (
+                        member_coupon_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        coupon_id INT NOT NULL,
+                        member_id INT NOT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'unused',
+                        issued_reason VARCHAR(255) NULL,
+                        issued_by VARCHAR(100) NULL,
+                        issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        expires_at DATE NULL,
+                        used_at TIMESTAMP NULL,
+                        INDEX idx_member_coupon_member (member_id),
+                        INDEX idx_member_coupon_status (status),
+                        INDEX idx_member_coupon_coupon (coupon_id)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+            conn.commit()
+            _reward_schema_ready = True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def rewards_context(message="", error=""):
+    ensure_rewards_tables()
+    sync_members_from_orders_admin()
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT member_id, customer_name, member_level
+                FROM members
+                ORDER BY customer_name ASC
+                LIMIT 2000
+                """
+            )
+            members = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT coupon_id, coupon_name, description, is_active, created_at, updated_at
+                FROM coupon_templates
+                ORDER BY is_active DESC, coupon_id DESC
+                LIMIT 200
+                """
+            )
+            coupons = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT
+                    mc.member_coupon_id,
+                    mc.status,
+                    mc.issued_reason,
+                    mc.issued_at,
+                    mc.expires_at,
+                    m.customer_name,
+                    ct.coupon_name
+                FROM member_coupons mc
+                LEFT JOIN members m ON m.member_id = mc.member_id
+                LEFT JOIN coupon_templates ct ON ct.coupon_id = mc.coupon_id
+                ORDER BY mc.issued_at DESC, mc.member_coupon_id DESC
+                LIMIT 100
+                """
+            )
+            issued_coupons = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT
+                    l.log_id,
+                    l.change_amount,
+                    l.balance_before,
+                    l.balance_after,
+                    l.reason,
+                    l.created_at,
+                    m.customer_name
+                FROM member_point_logs l
+                LEFT JOIN members m ON m.member_id = l.member_id
+                ORDER BY l.created_at DESC, l.log_id DESC
+                LIMIT 100
+                """
+            )
+            point_logs = cursor.fetchall()
+
+            cursor.execute("SELECT COALESCE(SUM(balance),0) AS total_points FROM member_points")
+            total_points = int((cursor.fetchone() or {}).get("total_points") or 0)
+
+            cursor.execute(
+                "SELECT COUNT(*) AS cnt FROM member_coupons WHERE status = 'unused'"
+            )
+            unused_coupons = int((cursor.fetchone() or {}).get("cnt") or 0)
+
+            cursor.execute(
+                "SELECT COUNT(*) AS cnt FROM coupon_templates WHERE is_active = 1"
+            )
+            active_coupon_templates = int((cursor.fetchone() or {}).get("cnt") or 0)
+    finally:
+        conn.close()
+
+    return {
+        "members": members,
+        "coupon_templates": coupons,
+        "issued_coupons": issued_coupons,
+        "point_logs": point_logs,
+        "total_points": total_points,
+        "unused_coupons": unused_coupons,
+        "active_coupon_templates": active_coupon_templates,
+        "message": str(message or ""),
+        "error": str(error or ""),
+    }
+
+
+@app.get("/rewards")
+def rewards_page(
+    request: Request,
+    message: str = "",
+    error: str = "",
+    admin: str = Depends(verify_admin),
+):
+    return templates.TemplateResponse(
+        request=request,
+        name="rewards.html",
+        context=rewards_context(message, error),
+    )
+
+
+@app.post("/rewards/points/adjust")
+def rewards_points_adjust(
+    request: Request,
+    member_id: int = Form(...),
+    change_amount: int = Form(...),
+    reason: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_rewards_tables()
+
+    reason_value = str(reason or "").strip()[:255]
+    if change_amount == 0:
+        return RedirectResponse(
+            url="/rewards?error=" + quote("點數異動不可為 0"),
+            status_code=303,
+        )
+    if abs(int(change_amount)) > 1000000:
+        raise HTTPException(status_code=422, detail="單次點數異動過大")
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT member_id FROM members WHERE member_id = %s LIMIT 1",
+                (member_id,),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="找不到會員")
+
+            cursor.execute(
+                """
+                INSERT IGNORE INTO member_points (member_id, balance)
+                VALUES (%s, 0)
+                """,
+                (member_id,),
+            )
+            cursor.execute(
+                "SELECT balance FROM member_points WHERE member_id = %s FOR UPDATE",
+                (member_id,),
+            )
+            before = int((cursor.fetchone() or {}).get("balance") or 0)
+            after = before + int(change_amount)
+            if after < 0:
+                raise HTTPException(status_code=422, detail="扣除後點數不可小於 0")
+
+            cursor.execute(
+                "UPDATE member_points SET balance = %s WHERE member_id = %s",
+                (after, member_id),
+            )
+            cursor.execute(
+                """
+                INSERT INTO member_point_logs
+                    (member_id, change_amount, balance_before, balance_after, reason, admin_username)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                """,
+                (member_id, int(change_amount), before, after, reason_value or None, admin),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return RedirectResponse(
+        url="/rewards?message=" + quote("點數已更新"),
+        status_code=303,
+    )
+
+
+@app.post("/rewards/coupons/templates/create")
+def rewards_coupon_template_create(
+    request: Request,
+    coupon_name: str = Form(""),
+    description: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_rewards_tables()
+
+    name = str(coupon_name or "").strip()
+    desc = str(description or "").strip()
+    if not name or len(name) > 120:
+        raise HTTPException(status_code=422, detail="優惠券名稱不可空白，且最多 120 字")
+    if len(desc) > 65535:
+        raise HTTPException(status_code=422, detail="優惠券說明過長")
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO coupon_templates
+                    (coupon_name, description, is_active, created_by)
+                VALUES (%s,%s,1,%s)
+                """,
+                (name, desc or None, admin),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return RedirectResponse(
+        url="/rewards?message=" + quote("優惠券方案已建立"),
+        status_code=303,
+    )
+
+
+@app.post("/rewards/coupons/templates/{coupon_id}/toggle")
+def rewards_coupon_template_toggle(
+    request: Request,
+    coupon_id: int,
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_rewards_tables()
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE coupon_templates
+                SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END
+                WHERE coupon_id = %s
+                """,
+                (coupon_id,),
+            )
+            if cursor.rowcount != 1:
+                raise HTTPException(status_code=404, detail="找不到優惠券方案")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return RedirectResponse(url="/rewards", status_code=303)
+
+
+@app.post("/rewards/coupons/issue")
+def rewards_coupon_issue(
+    request: Request,
+    member_id: int = Form(...),
+    coupon_id: int = Form(...),
+    expires_at: str = Form(""),
+    issued_reason: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_rewards_tables()
+
+    expiry_value = None
+    if str(expires_at or "").strip():
+        try:
+            expiry_value = datetime.strptime(expires_at, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=422, detail="優惠券到期日格式錯誤")
+
+    reason = str(issued_reason or "").strip()[:255]
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT member_id FROM members WHERE member_id = %s LIMIT 1",
+                (member_id,),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="找不到會員")
+
+            cursor.execute(
+                """
+                SELECT coupon_id
+                FROM coupon_templates
+                WHERE coupon_id = %s AND is_active = 1
+                LIMIT 1
+                """,
+                (coupon_id,),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="找不到可發放的優惠券")
+
+            cursor.execute(
+                """
+                INSERT INTO member_coupons
+                    (coupon_id, member_id, status, issued_reason, issued_by, expires_at)
+                VALUES (%s,%s,'unused',%s,%s,%s)
+                """,
+                (coupon_id, member_id, reason or None, admin, expiry_value),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return RedirectResponse(
+        url="/rewards?message=" + quote("優惠券已發放"),
+        status_code=303,
+    )
+
+
+@app.post("/rewards/coupons/{member_coupon_id}/status")
+def rewards_coupon_status(
+    request: Request,
+    member_coupon_id: int,
+    status: str = Form("unused"),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_rewards_tables()
+    if status not in REWARD_COUPON_STATUSES:
+        raise HTTPException(status_code=422, detail="優惠券狀態不正確")
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE member_coupons
+                SET status = %s,
+                    used_at = CASE WHEN %s = 'used' THEN CURRENT_TIMESTAMP ELSE NULL END
+                WHERE member_coupon_id = %s
+                """,
+                (status, status, member_coupon_id),
+            )
+            if cursor.rowcount != 1:
+                raise HTTPException(status_code=404, detail="找不到會員優惠券")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return RedirectResponse(url="/rewards", status_code=303)
 
 
 # =========================================================
@@ -3561,6 +4166,7 @@ def _profit_date_bounds():
 
 
 def _profit_rows(start_date, end_date, rates_by_month):
+    ensure_order_cost_columns()
     conn = get_db()
     try:
         with conn.cursor() as cursor:
@@ -3568,7 +4174,8 @@ def _profit_rows(start_date, end_date, rates_by_month):
                 """
                 SELECT
                     order_id, order_time, customer_name, platform, tracking_number,
-                    amount_rmb, service_fee, weight_kg, is_arrived, is_returned,
+                    amount_rmb, purchase_payment_method, card_cost_twd,
+                    service_fee, weight_kg, is_arrived, is_returned,
                     is_early_returned, remarks, order_status
                 FROM orders
                 WHERE order_time >= %s AND order_time <= %s
@@ -3590,28 +4197,62 @@ def _profit_rows(start_date, end_date, rates_by_month):
         rate_row = rates_by_month.get(month_key)
         is_payment = str(row.get("customer_name") or "").strip() == "代付"
 
+        payment_method = normalize_purchase_payment_method(
+            row.get("purchase_payment_method")
+        )
+        card_cost_raw = row.get("card_cost_twd")
+        card_cost = None
+        if card_cost_raw not in (None, ""):
+            card_cost = _profit_decimal(card_cost_raw).quantize(Decimal("0.01"))
+
         rmb_rate = None
         sell_rate = None
+        cost_twd = None
+        cost_rate = None
         rate_profit = None
         total_profit = None
+        rate_missing = rate_row is None
+        card_cost_missing = payment_method == "card" and (
+            card_cost is None or (amount > 0 and card_cost <= 0)
+        )
+
         if rate_row:
             rmb_rate = _profit_decimal(rate_row.get("rmb_rate"))
             sell_rate = _profit_decimal(
                 rate_row.get("payment_sell_rate") if is_payment
                 else rate_row.get("purchase_sell_rate")
             )
-            rate_profit = (amount * (sell_rate - rmb_rate)).quantize(Decimal("0.01"))
-            total_profit = (rate_profit + fee).quantize(Decimal("0.01"))
+
+            if payment_method == "card":
+                if not card_cost_missing:
+                    cost_twd = card_cost
+                    if amount > 0:
+                        cost_rate = (card_cost / amount).quantize(Decimal("0.0001"))
+            else:
+                cost_twd = (amount * rmb_rate).quantize(Decimal("0.01"))
+                cost_rate = rmb_rate
+
+            if cost_twd is not None:
+                sell_twd = (amount * sell_rate).quantize(Decimal("0.01"))
+                rate_profit = (sell_twd - cost_twd).quantize(Decimal("0.01"))
+                total_profit = (rate_profit + fee).quantize(Decimal("0.01"))
 
         item = dict(row)
         item.update({
             "rate_month": month_key,
-            "rate_missing": rate_row is None,
+            "rate_missing": rate_missing,
+            "card_cost_missing": card_cost_missing,
+            "profit_missing": rate_missing or card_cost_missing,
             "order_type": "代付" if is_payment else "代購",
+            "payment_method": payment_method,
+            "payment_method_label": "刷卡" if payment_method == "card" else "支付寶",
             "amount_rmb_num": amount,
+            "card_cost_twd_num": card_cost,
+            "cost_twd_num": cost_twd,
             "service_fee_num": fee,
             "weight_num": weight,
             "rmb_rate_num": rmb_rate,
+            "cost_rate_num": cost_rate,
             "sell_rate_num": sell_rate,
             "rate_profit_num": rate_profit,
             "total_profit_num": total_profit,
@@ -3642,9 +4283,12 @@ def _profit_context(start_date="", end_date="", rate_month="", message="", error
     rows = _profit_rows(start, end, rates_by_month)
     months_with_orders = sorted({r["rate_month"] for r in rows if r.get("rate_month")})
     missing_months = [m for m in months_with_orders if m not in rates_by_month]
-    can_calculate = not missing_months
+    missing_card_cost_orders = [
+        int(r["order_id"]) for r in rows if r.get("card_cost_missing")
+    ]
+    can_calculate = not missing_months and not missing_card_cost_orders
 
-    completed_rows = [r for r in rows if not r["rate_missing"]]
+    completed_rows = [r for r in rows if not r["profit_missing"]]
     payment_rows_complete = [r for r in completed_rows if r["order_type"] == "代付"]
     purchase_rows_complete = [r for r in completed_rows if r["order_type"] == "代購"]
 
@@ -3677,6 +4321,7 @@ def _profit_context(start_date="", end_date="", rate_month="", message="", error
         "purchase_profit": float(purchase_profit),
         "can_calculate": can_calculate,
         "missing_months": missing_months,
+        "missing_card_cost_orders": missing_card_cost_orders,
         "used_months": months_with_orders,
         "rate_history": history,
         "rate_month": chosen_month,
@@ -3776,8 +4421,16 @@ def profit_export(
 ):
     _check_same_origin(request)
     context = _profit_context(start_date, end_date, rate_month)
+    errors = []
     if context["missing_months"]:
-        context["error"] = "請先設定以下月份的匯率，再匯出：" + "、".join(context["missing_months"])
+        errors.append("請先設定以下月份的匯率：" + "、".join(context["missing_months"]))
+    if context.get("missing_card_cost_orders"):
+        errors.append(
+            "以下刷卡訂單尚未填入刷卡金額："
+            + "、".join(f"#{x}" for x in context["missing_card_cost_orders"])
+        )
+    if errors:
+        context["error"] = "；".join(errors)
         return templates.TemplateResponse(request=request, name="profit.html", context=context, status_code=422)
 
     rows = context["all_rows"]

@@ -38,60 +38,102 @@ def _number_cell(ref: str, value, style: int = 0) -> str:
 
 def make_profit_xlsx(rows: list[dict], start_date: str, end_date: str, rate_records: dict) -> bytes:
     headers = [
-        "訂單編號", "下單日期", "客戶姓名", "匯率月份", "訂單類型", "平台", "物流單號",
-        "人民幣金額", "人民幣成本匯率", "適用定價匯率", "手續費收入",
-        "匯率價差利潤", "總利潤", "重量(kg)", "是否到貨", "是否已運回",
-        "提前運回", "訂單狀態", "備註"
+        "訂單編號", "下單日期", "客戶姓名", "匯率月份", "訂單類型", "採購付款",
+        "平台", "物流單號", "人民幣金額", "實際成本匯率", "實際成本(TWD)",
+        "適用定價匯率", "手續費收入", "價差利潤", "總利潤", "重量(kg)",
+        "是否到倉", "是否已運回", "提前運回", "訂單狀態", "備註"
     ]
 
     rows_xml = []
     title = f"橘貓代購利潤報表｜{start_date} ～ {end_date}"
     rows_xml.append('<row r="1" ht="28" customHeight="1">' + _inline_cell("A1", title, 3) + '</row>')
+
     months = sorted(rate_records)
-    rate_text = "每筆訂單依下單月份自動套用保存匯率"
+    rate_text = "支付寶訂單依下單月份套用保存成本匯率；刷卡訂單使用每筆實際刷卡台幣成本"
     if months:
         rate_text += "｜月份：" + "、".join(months)
     rows_xml.append('<row r="2">' + _inline_cell("A2", rate_text, 0) + '</row>')
-    header_cells = ''.join(_inline_cell(_cell_ref(i + 1, 4), h, 1) for i, h in enumerate(headers))
+
+    header_cells = ''.join(
+        _inline_cell(_cell_ref(i + 1, 4), h, 1)
+        for i, h in enumerate(headers)
+    )
     rows_xml.append(f'<row r="4" ht="24" customHeight="1">{header_cells}</row>')
 
-    numeric_cols = {1, 8, 9, 10, 11, 12, 13, 14}
+    numeric_cols = {1, 9, 10, 11, 12, 13, 14, 15, 16}
+
     for row_idx, r in enumerate(rows, start=5):
         values = [
-            r.get("order_id"), r.get("order_time"), r.get("customer_name"), r.get("rate_month"),
-            r.get("order_type"), r.get("platform"), r.get("tracking_number"),
-            r.get("amount_rmb_num"), r.get("rmb_rate_num"), r.get("sell_rate_num"),
-            r.get("service_fee_num"), r.get("rate_profit_num"), r.get("total_profit_num"),
-            r.get("weight_num"), "是" if r.get("is_arrived") else "否",
+            r.get("order_id"),
+            r.get("order_time"),
+            r.get("customer_name"),
+            r.get("rate_month"),
+            r.get("order_type"),
+            r.get("payment_method_label"),
+            r.get("platform"),
+            r.get("tracking_number"),
+            r.get("amount_rmb_num"),
+            r.get("cost_rate_num"),
+            r.get("cost_twd_num"),
+            r.get("sell_rate_num"),
+            r.get("service_fee_num"),
+            r.get("rate_profit_num"),
+            r.get("total_profit_num"),
+            r.get("weight_num"),
+            "是" if r.get("is_arrived") else "否",
             "是" if r.get("is_returned") else "否",
             "是" if r.get("is_early_returned") else "否",
-            r.get("order_status") or "正常", r.get("remarks") or ""
+            r.get("order_status") or "正常",
+            r.get("remarks") or "",
         ]
+
         cells = []
         for col_idx, value in enumerate(values, start=1):
             ref = _cell_ref(col_idx, row_idx)
-            cells.append(_number_cell(ref, value, 2) if col_idx in numeric_cols else _inline_cell(ref, value, 0))
+            if col_idx in numeric_cols:
+                cells.append(_number_cell(ref, value, 2))
+            else:
+                cells.append(_inline_cell(ref, value, 0))
         rows_xml.append(f'<row r="{row_idx}">{"".join(cells)}</row>')
 
     total_row = 5 + len(rows)
-    total_rate_profit = sum(Decimal(str(r.get("rate_profit_num") or 0)) for r in rows)
-    total_service_fee = sum(Decimal(str(r.get("service_fee_num") or 0)) for r in rows)
-    total_profit = sum(Decimal(str(r.get("total_profit_num") or 0)) for r in rows)
+    total_margin = sum(
+        Decimal(str(r.get("rate_profit_num") or 0))
+        for r in rows
+        if not r.get("profit_missing")
+    )
+    total_service_fee = sum(
+        Decimal(str(r.get("service_fee_num") or 0))
+        for r in rows
+    )
+    total_profit = sum(
+        Decimal(str(r.get("total_profit_num") or 0))
+        for r in rows
+        if not r.get("profit_missing")
+    )
+
     summary_cells = [
         _inline_cell(f"A{total_row}", "合計", 4),
-        _inline_cell(f"J{total_row}", "匯率價差", 4),
-        _number_cell(f"K{total_row}", total_rate_profit, 5),
-        _inline_cell(f"L{total_row}", "手續費", 4),
         _number_cell(f"M{total_row}", total_service_fee, 5),
-        _inline_cell(f"N{total_row}", "總利潤", 4),
+        _number_cell(f"N{total_row}", total_margin, 5),
         _number_cell(f"O{total_row}", total_profit, 5),
     ]
-    rows_xml.append(f'<row r="{total_row}" ht="24" customHeight="1">{"".join(summary_cells)}</row>')
+    rows_xml.append(
+        f'<row r="{total_row}" ht="24" customHeight="1">{"".join(summary_cells)}</row>'
+    )
 
-    widths = [12,14,18,11,12,12,22,14,16,16,14,16,14,12,12,12,12,12,28]
-    cols_xml = ''.join(f'<col min="{i}" max="{i}" width="{w}" customWidth="1"/>' for i, w in enumerate(widths, start=1))
+    widths = [
+        12, 14, 18, 11, 12, 12, 12, 22, 14, 16, 16, 16, 14, 16, 14, 12,
+        12, 12, 12, 12, 28
+    ]
+    cols_xml = ''.join(
+        f'<col min="{i}" max="{i}" width="{w}" customWidth="1"/>'
+        for i, w in enumerate(widths, start=1)
+    )
+
     last_ref = _cell_ref(len(headers), total_row)
     last_col = _cell_ref(len(headers), 1)[:-1]
+
     sheet_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
