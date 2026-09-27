@@ -3206,3 +3206,369 @@ summary .auto-line-icon { margin-right: .42em; }
     }
 }
 
+
+
+/* ======================================================
+   採購付款方式 / 刷卡成本
+====================================================== */
+.create-payment-block,
+.order-edit-payment {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid #eeeeee;
+}
+
+.order-edit-payment {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+}
+
+.payment-method-switch {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.payment-method-option {
+    position: relative;
+    cursor: pointer;
+    margin: 0;
+}
+
+.payment-method-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.payment-method-option span {
+    min-width: 128px;
+    height: 44px;
+    padding: 0 16px;
+    border: 1px solid #dddddd;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #555555;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 14px;
+    transition: .15s ease;
+}
+
+.payment-method-option input:checked + span {
+    border-color: #f2a24c;
+    background: #fff4e6;
+    color: #c96d00;
+    box-shadow: 0 0 0 2px rgba(240, 131, 0, .06);
+}
+
+.card-cost-field {
+    max-width: 460px;
+    margin-top: 14px;
+}
+
+.is-hidden {
+    display: none !important;
+}
+
+.status-unshipped {
+    background: #f2f2f2;
+    color: #777777;
+}
+
+.profit-payment-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.profit-payment-pill.alipay {
+    background: #eef7ff;
+    color: #3978a8;
+}
+
+.profit-payment-pill.card {
+    background: #f5efff;
+    color: #7452a1;
+}
+
+.member-stat-strip {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.member-coupon-list {
+    display: grid;
+    gap: 8px;
+    margin: 10px 0 18px;
+}
+
+.member-coupon-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 13px;
+    border: 1px solid #eeeeee;
+    border-radius: 10px;
+    background: #ffffff;
+}
+
+.member-coupon-item strong,
+.member-coupon-item small {
+    display: block;
+}
+
+.member-coupon-item small {
+    margin-top: 3px;
+    color: #999999;
+    font-size: 11px;
+}
+
+
+/* ======================================================
+   優惠券與點數
+====================================================== */
+.reward-message {
+    margin-top: 18px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+}
+
+.reward-message.success {
+    background: #edf8f0;
+    color: #35784a;
+}
+
+.reward-message.error {
+    background: #fff0f0;
+    color: #a84c4c;
+}
+
+.reward-kpi-grid {
+    margin-top: 24px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.reward-kpi {
+    background: #ffffff;
+    border: 1px solid #ececec;
+    border-radius: 15px;
+    padding: 18px 20px;
+}
+
+.reward-kpi span {
+    display: block;
+    color: #929292;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.reward-kpi strong {
+    font-size: 26px;
+}
+
+.reward-grid {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.reward-card {
+    margin-top: 18px;
+    background: #ffffff;
+    border: 1px solid #ececec;
+    border-radius: 16px;
+    padding: 20px;
+}
+
+.reward-grid .reward-card {
+    margin-top: 0;
+}
+
+.reward-card h2 {
+    margin: 0 0 16px;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.reward-card h2 i {
+    color: #f08300;
+}
+
+.reward-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: end;
+}
+
+.reward-issue-form {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+}
+
+.reward-field-wide {
+    grid-column: 1 / -1;
+}
+
+.reward-form .search-field select {
+    width: 100%;
+    height: 44px;
+    border: 1px solid #dddddd;
+    border-radius: 9px;
+    padding: 0 12px;
+    background: #ffffff;
+    font: inherit;
+    color: #333333;
+}
+
+.reward-form-action {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.reward-form-action .search-button {
+    height: 44px;
+    white-space: nowrap;
+}
+
+.reward-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.reward-table-wrap {
+    overflow-x: auto;
+}
+
+.reward-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 520px;
+}
+
+.reward-table th {
+    background: #fafafa;
+    color: #888888;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 10px 12px;
+    text-align: left;
+}
+
+.reward-table td {
+    border-top: 1px solid #eeeeee;
+    padding: 11px 12px;
+    font-size: 13px;
+    vertical-align: middle;
+}
+
+.reward-table td small {
+    display: block;
+    color: #999999;
+    margin-top: 3px;
+    font-size: 11px;
+}
+
+.reward-status {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.reward-status.unused {
+    background: #edf8f0;
+    color: #35784a;
+}
+
+.reward-status.used {
+    background: #eef4ff;
+    color: #486f9c;
+}
+
+.reward-status.cancelled {
+    background: #f2f2f2;
+    color: #777777;
+}
+
+.reward-small-button {
+    border: 1px solid #dddddd;
+    background: #ffffff;
+    color: #666666;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+.reward-status-select {
+    height: 34px;
+    border: 1px solid #dddddd;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 0 8px;
+    font-size: 12px;
+}
+
+.reward-positive {
+    color: #2f8a53;
+    font-weight: 700;
+}
+
+.reward-negative {
+    color: #b25050;
+    font-weight: 700;
+}
+
+@media (max-width: 1050px) {
+    .reward-issue-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 900px) {
+    .member-stat-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .order-edit-payment,
+    .reward-grid,
+    .reward-kpi-grid,
+    .reward-form,
+    .reward-issue-form {
+        grid-template-columns: 1fr;
+    }
+
+    .reward-field-wide {
+        grid-column: auto;
+    }
+
+    .payment-method-option {
+        flex: 1;
+    }
+
+    .payment-method-option span {
+        width: 100%;
+        min-width: 0;
+    }
+}
