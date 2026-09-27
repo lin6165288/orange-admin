@@ -3572,3 +3572,347 @@ summary .auto-line-icon { margin-right: .42em; }
         min-width: 0;
     }
 }
+
+
+/* ======================================================
+   優惠券 / 點數 v2
+====================================================== */
+.reward-issue-form-v2 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.reward-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    grid-column: 1 / -2;
+    color: #777;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.reward-check input {
+    width: 16px;
+    height: 16px;
+    accent-color: #f39727;
+}
+
+.reward-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+}
+
+.reward-delete-button {
+    color: #c85d5d;
+    border-color: #edcaca;
+    background: #fff8f8;
+}
+
+.reward-use-button {
+    color: #fff;
+    background: #f39727;
+    border-color: #f39727;
+    text-decoration: none;
+}
+
+.reward-locked-text {
+    color: #aaa;
+    font-size: 12px;
+}
+
+.reward-back-link {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 8px;
+    color: #888;
+    text-decoration: none;
+    font-size: 13px;
+}
+
+.reward-redeem-summary {
+    margin-bottom: 18px;
+}
+
+.reward-redeem-title {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.reward-redeem-title > div {
+    padding: 14px 16px;
+    border: 1px solid #ededed;
+    border-radius: 12px;
+    background: #fafafa;
+}
+
+.reward-redeem-title span,
+.reward-redeem-title small {
+    display: block;
+    color: #999;
+    font-size: 12px;
+}
+
+.reward-redeem-title strong {
+    display: block;
+    margin: 4px 0;
+    font-size: 18px;
+}
+
+.reward-order-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    margin-top: 14px;
+}
+
+.reward-order-option {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 140px 90px;
+    gap: 14px;
+    align-items: center;
+    padding: 13px 15px;
+    border: 1px solid #e7e7e7;
+    border-radius: 12px;
+    background: #fff;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+}
+
+.reward-order-option:hover {
+    border-color: #f0c38d;
+    background: #fffaf4;
+}
+
+.reward-order-option:has(input:checked) {
+    border-color: #f39727;
+    background: #fff7ec;
+}
+
+.reward-order-option input {
+    width: 17px;
+    height: 17px;
+    accent-color: #f39727;
+}
+
+.reward-order-main strong,
+.reward-order-main span,
+.reward-order-main small,
+.reward-order-fee small,
+.reward-order-fee strong {
+    display: block;
+}
+
+.reward-order-main span {
+    margin-top: 3px;
+    color: #666;
+    font-size: 13px;
+}
+
+.reward-order-main small,
+.reward-order-fee small {
+    margin-top: 3px;
+    color: #aaa;
+    font-size: 11px;
+}
+
+.reward-order-fee {
+    text-align: right;
+}
+
+.reward-order-fee strong {
+    margin-top: 3px;
+}
+
+.reward-order-status {
+    justify-self: end;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: #fff1db;
+    color: #b56a0b;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.reward-redeem-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+}
+
+.reward-redeem-note {
+    margin-top: 16px;
+}
+
+.reward-redeem-warning {
+    margin-top: 16px;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 11px 13px;
+    background: #fff8ed;
+    border: 1px solid #f2d8b4;
+    border-radius: 10px;
+    color: #8b6a3d;
+    font-size: 13px;
+}
+
+.reward-redeem-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+@media (max-width: 1000px) {
+    .reward-issue-form-v2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .reward-redeem-title {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    .reward-issue-form-v2,
+    .reward-redeem-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .reward-check {
+        grid-column: 1;
+    }
+
+    .reward-order-option {
+        grid-template-columns: 24px 1fr;
+    }
+
+    .reward-order-fee,
+    .reward-order-status {
+        grid-column: 2;
+        justify-self: start;
+        text-align: left;
+    }
+}
+
+
+/* ======================================================
+   訂單批次送點
+====================================================== */
+.reward-point-batch-card {
+    margin-bottom: 18px;
+}
+
+.reward-point-batch-head {
+    align-items: flex-start;
+}
+
+.reward-point-batch-head > span {
+    color: #999;
+    font-size: 12px;
+}
+
+.reward-point-date-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+    gap: 14px;
+    align-items: end;
+    margin-bottom: 18px;
+}
+
+.reward-point-batch-settings {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: end;
+    padding: 15px;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    background: #fafafa;
+}
+
+.reward-repeat-check {
+    min-height: 44px;
+    grid-column: auto;
+    white-space: nowrap;
+}
+
+.reward-point-table-tools {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0 10px;
+    color: #888;
+    font-size: 12px;
+}
+
+.reward-point-orders-wrap {
+    max-height: 520px;
+    overflow: auto;
+}
+
+.reward-point-orders-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #fafafa;
+}
+
+.reward-order-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: #f39727;
+}
+
+.reward-existing-points {
+    display: inline-flex;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #fff1db;
+    color: #a96612;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.reward-point-submit-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 14px;
+    margin-top: 15px;
+}
+
+.reward-point-submit-row > span {
+    color: #888;
+    font-size: 13px;
+}
+
+.reward-secondary-grid {
+    margin-top: 18px;
+}
+
+@media (max-width: 900px) {
+    .reward-point-date-form,
+    .reward-point-batch-settings {
+        grid-template-columns: 1fr;
+    }
+
+    .reward-repeat-check {
+        white-space: normal;
+    }
+
+    .reward-point-table-tools,
+    .reward-point-submit-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}
+
