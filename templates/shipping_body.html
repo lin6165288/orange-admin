@@ -135,7 +135,7 @@
       <td>{{ order.platform or '—' }}</td>
       <td class="ship-tracking">{{ order.tracking_number or '—' }}</td>
       <td>{{ '%.2f'|format(order.weight_num) }} kg</td>
-      <td>{% if order.is_arrived %}<span class="ship-tag ready">已到貨</span>{% else %}<span class="ship-tag">未到貨</span>{% endif %}
+      <td>{% if order.is_arrived %}<span class="ship-tag ready">已到倉</span>{% else %}<span class="ship-tag">未到倉</span>{% endif %}
           {% if order.is_early_returned %}<span class="ship-tag early">提前運回</span>{% endif %}</td>
       <td>{% if order.delayed %}<span class="ship-tag delay">延後</span>{% endif %}
           {% if order.notified %}<span class="ship-tag notified">已通知</span>{% endif %}
