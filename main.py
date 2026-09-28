@@ -1452,6 +1452,7 @@ async def update_order(
 
     ensure_order_cost_columns()
     ensure_audit_storage()
+    ensure_rewards_tables()
 
     conn = get_db()
 
@@ -1611,6 +1612,127 @@ async def update_order(
     )
 
 
+def reverse_active_order_points_for_delete(
+    cursor,
+    order_id: int,
+    admin_username: str,
+):
+    """刪除訂單前扣回該訂單所有尚未反轉的「訂單送點」。
+
+    這個函式必須使用與 DELETE orders 相同的 cursor / transaction，
+    這樣如果後續刪除失敗，點數扣回也會一起 rollback。
+    """
+    cursor.execute(
+        """
+        SELECT
+            award_id,
+            batch_id,
+            member_id,
+            points_awarded
+        FROM order_point_awards
+        WHERE order_id = %s
+          AND is_reversed = 0
+        ORDER BY award_id ASC
+        FOR UPDATE
+        """,
+        (order_id,),
+    )
+    awards = cursor.fetchall()
+
+    reversed_count = 0
+    reversed_points = 0
+
+    for award in awards:
+        member_id = int(award["member_id"])
+        points = int(award.get("points_awarded") or 0)
+
+        if points <= 0:
+            cursor.execute(
+                """
+                UPDATE order_point_awards
+                SET is_reversed = 1,
+                    reversed_at = CURRENT_TIMESTAMP,
+                    reverse_reason = '訂單刪除'
+                WHERE award_id = %s
+                """,
+                (award["award_id"],),
+            )
+            continue
+
+        cursor.execute(
+            """
+            INSERT IGNORE INTO member_points (member_id, balance)
+            VALUES (%s, 0)
+            """,
+            (member_id,),
+        )
+        cursor.execute(
+            """
+            SELECT balance
+            FROM member_points
+            WHERE member_id = %s
+            FOR UPDATE
+            """,
+            (member_id,),
+        )
+        before = int((cursor.fetchone() or {}).get("balance") or 0)
+        after = before - points
+
+        cursor.execute(
+            """
+            UPDATE member_points
+            SET balance = %s
+            WHERE member_id = %s
+            """,
+            (after, member_id),
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO member_point_logs
+            (
+                member_id,
+                change_amount,
+                balance_before,
+                balance_after,
+                reason,
+                admin_username,
+                source_type,
+                source_order_id,
+                source_batch_id
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """,
+            (
+                member_id,
+                -points,
+                before,
+                after,
+                f"訂單 #{order_id} 已刪除，自動扣回訂單點數",
+                admin_username,
+                "order_delete_reversal",
+                order_id,
+                award.get("batch_id"),
+            ),
+        )
+
+        cursor.execute(
+            """
+            UPDATE order_point_awards
+            SET is_reversed = 1,
+                reversed_at = CURRENT_TIMESTAMP,
+                reverse_reason = '訂單刪除'
+            WHERE award_id = %s
+            """,
+            (award["award_id"],),
+        )
+
+        reversed_count += 1
+        reversed_points += points
+
+    return reversed_count, reversed_points
+
+
 # =========================================================
 # Delete Order
 # =========================================================
@@ -1704,6 +1826,13 @@ async def delete_order(
                     None
             )
 
+
+            # 若此訂單曾透過批次送點取得點數，刪除前先在同一 transaction 扣回。
+            reverse_active_order_points_for_delete(
+                cursor=cursor,
+                order_id=order_id,
+                admin_username=admin,
+            )
 
             # Delete
             cursor.execute(
