@@ -559,7 +559,7 @@ AUDIT_FIELD_LABELS = {
         "備註",
 
     "is_arrived":
-        "已到貨",
+        "已到倉",
 
     "is_returned":
         "已運回",
@@ -2884,7 +2884,7 @@ def apply_shipping_action(order_ids, action, admin, mode="ready", customer="",
                     raise HTTPException(status_code=409, detail=f"#{oid} 已取消或已運回，整批未更動")
                 if action == "returned":
                     if not old.get("is_arrived"):
-                        raise HTTPException(status_code=409, detail=f"#{oid} 尚未到貨，整批未更動")
+                        raise HTTPException(status_code=409, detail=f"#{oid} 尚未到倉，整批未更動")
                     if SHIPPING_DELAY_TAG in str(old.get("remarks") or ""):
                         raise HTTPException(status_code=409, detail=f"#{oid} 標記延後，請先取消延後再出貨")
                     if old.get("is_returned"):
@@ -3451,6 +3451,7 @@ def member_order_stats(names):
                         MAX(order_time) AS last_order_date
                     FROM orders
                     WHERE customer_name IN ({placeholders})
+                      AND COALESCE(order_status, '正常') <> '取消'
                     GROUP BY customer_name
                     """,
                     batch,
@@ -3565,6 +3566,7 @@ def member_detail_context(member_id: int):
                        COALESCE(SUM(amount_rmb),0) AS total_rmb
                 FROM orders
                 WHERE customer_name = %s
+                  AND COALESCE(order_status, '正常') <> '取消'
                 """,
                 (member["customer_name"],),
             )
@@ -5442,6 +5444,7 @@ def _profit_date_bounds():
                 SELECT MIN(order_time) AS min_date, MAX(order_time) AS max_date
                 FROM orders
                 WHERE order_time IS NOT NULL
+                  AND COALESCE(order_status, '正常') <> '取消'
                 """
             )
             row = cursor.fetchone() or {}
@@ -5464,6 +5467,7 @@ def _profit_rows(start_date, end_date, rates_by_month):
                     is_early_returned, remarks, order_status
                 FROM orders
                 WHERE order_time >= %s AND order_time <= %s
+                  AND COALESCE(order_status, '正常') <> '取消'
                 ORDER BY order_time DESC, order_id DESC
                 """,
                 (start_date, end_date),
