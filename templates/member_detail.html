@@ -28,6 +28,56 @@
     <div><span>累計重量</span><strong>{{ '%.2f'|format(stats.total_weight_num) }} kg</strong></div>
     <div><span>累計人民幣</span><strong>¥{{ '%.2f'|format(stats.total_rmb_num) }}</strong></div>
     <div><span>目前點數</span><strong>{{ points_balance }}</strong></div>
+    <div><span>目前餘額</span><strong>NT$ {{ '%.2f'|format(balance_twd|float) }}</strong></div>
+  </div>
+
+  <div class="member-balance-panel">
+    <div class="member-orders-title"><span class="section-title-icon"><i class="bi bi-wallet2"></i></span>餘額管理</div>
+    <form class="member-balance-form"
+          hx-post="/members/{{ member.member_id }}/balance/adjust"
+          hx-target="#member-detail-{{ member.member_id }}"
+          hx-swap="innerHTML">
+      <div class="edit-field">
+        <label>異動類型</label>
+        <select name="operation">
+          <option value="recharge">儲值（增加）</option>
+          <option value="add">手動增加</option>
+          <option value="subtract">手動扣款</option>
+        </select>
+      </div>
+      <div class="edit-field">
+        <label>台幣金額</label>
+        <div class="input-prefix"><span>NT$</span><input name="amount_twd" type="number" min="0.01" step="0.01" required></div>
+      </div>
+      <div class="edit-field member-balance-note">
+        <label>備註</label>
+        <input name="note" maxlength="255" placeholder="例如：9/28 匯款儲值">
+      </div>
+      <button type="submit" class="edit-save"><i class="bi bi-check2"></i><span>確認異動</span></button>
+    </form>
+
+    <div class="member-orders-title balance-history-title"><span class="section-title-icon"><i class="bi bi-receipt"></i></span>最近餘額紀錄 <small>最多 30 筆</small></div>
+    {% if balance_logs %}
+    <div class="member-orders-wrap">
+      <table class="member-orders-table">
+        <thead><tr><th>時間</th><th>異動</th><th>前</th><th>後</th><th>訂單</th><th>備註</th></tr></thead>
+        <tbody>
+        {% for log in balance_logs %}
+          <tr>
+            <td>{{ log.created_at or '—' }}</td>
+            <td><strong class="{% if log.change_amount|float >= 0 %}balance-plus{% else %}balance-minus{% endif %}">{{ '+' if log.change_amount|float >= 0 else '' }}{{ '%.2f'|format(log.change_amount|float) }}</strong></td>
+            <td>{{ '%.2f'|format(log.balance_before|float) }}</td>
+            <td>{{ '%.2f'|format(log.balance_after|float) }}</td>
+            <td>{% if log.order_id %}#{{ log.order_id }}{% else %}—{% endif %}</td>
+            <td>{{ log.note or '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="member-orders-empty">目前沒有餘額異動紀錄。</div>
+    {% endif %}
   </div>
 
   <div class="member-note-box">

@@ -71,6 +71,30 @@
                 </div>
             </div>
         </div>
+        <div class="create-payment-block customer-payment-block">
+            <div class="create-heading">客戶付款方式</div>
+            <div class="payment-method-switch" role="radiogroup" aria-label="客戶付款方式">
+                <label class="payment-method-option">
+                    <input type="radio" name="customer_payment_method" value="bank_transfer"
+                           {% if customer_payment_method == 'bank_transfer' %}checked{% endif %}
+                           hx-get="/orders/new/fee" hx-trigger="change" hx-include="#create-order-form" hx-target="#fee-preview" hx-swap="innerHTML">
+                    <span><i class="bi bi-bank"></i> 銀行轉帳</span>
+                </label>
+                <label class="payment-method-option">
+                    <input type="radio" name="customer_payment_method" value="balance"
+                           {% if customer_payment_method == 'balance' %}checked{% endif %}
+                           hx-get="/orders/new/fee" hx-trigger="change" hx-include="#create-order-form" hx-target="#fee-preview" hx-swap="innerHTML">
+                    <span><i class="bi bi-cash-stack"></i> 餘額扣款</span>
+                </label>
+                <label class="payment-method-option">
+                    <input type="radio" name="customer_payment_method" value="cod"
+                           {% if customer_payment_method == 'cod' %}checked{% endif %}
+                           hx-get="/orders/new/fee" hx-trigger="change" hx-include="#create-order-form" hx-target="#fee-preview" hx-swap="innerHTML">
+                    <span><i class="bi bi-box-seam"></i> 貨到付款</span>
+                </label>
+            </div>
+        </div>
+
         <div class="create-fee-area">
             <div class="create-heading">代購手續費</div>
             <div id="fee-preview">

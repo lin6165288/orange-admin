@@ -1,10 +1,25 @@
 {% if error_message %}
-<div class="create-fee-error" role="status">{{ error_message }}</div>
+<div class="create-error">{{ error_message }}</div>
 {% else %}
-<div class="create-fee-summary">
-    <div><small>目前會員等級</small><strong>{{ member_level }}</strong></div>
-    <div><small>原始手續費</small><strong>NT$ {{ base_fee }}</strong></div>
-    <div><small>VIP 折扣</small><strong>{{ vip_discount }}</strong></div>
-    <div class="create-fee-total"><small>應收代購手續費</small><strong>NT$ {{ calculated_fee }}</strong></div>
+<div class="fee-preview-grid">
+  <div><span>會員等級</span><strong>{{ member_level or '一般會員' }}</strong></div>
+  <div><span>客戶付款</span><strong>{{ customer_payment_label or '銀行轉帳' }}</strong></div>
+  <div><span>本單定價匯率</span><strong>{{ '%.4f'|format(current_exchange_rate|float) }}</strong></div>
+  <div><span>本單手續費</span><strong>NT$ {{ '%.2f'|format(calculated_fee|float) }}</strong></div>
+  <div><span>本單應收台幣</span><strong>NT$ {{ '%.2f'|format(customer_total_twd|float) }}</strong></div>
+  {% if customer_payment_method == 'balance' %}
+  <div><span>會員目前餘額</span><strong>NT$ {{ '%.2f'|format(member_balance|float) }}</strong></div>
+  {% endif %}
 </div>
+{% if customer_payment_method == 'bank_transfer' %}
+<div class="fee-rule-note">銀行轉帳：使用一般手續費，不套用 VIP 折扣。</div>
+{% elif customer_payment_method == 'balance' %}
+  {% if balance_enough %}
+  <div class="fee-rule-note success">餘額扣款：套用會員折扣；新增成功後扣除 NT$ {{ '%.2f'|format(customer_total_twd|float) }}。</div>
+  {% else %}
+  <div class="fee-rule-note danger">餘額不足，新增時會阻擋此筆訂單。</div>
+  {% endif %}
+{% elif customer_payment_method == 'cod' %}
+<div class="fee-rule-note">貨到付款：手續費固定 NT$60，不套用會員折扣。</div>
+{% endif %}
 {% endif %}
