@@ -318,6 +318,25 @@ def ensure_customer_payment_balance_schema():
                     VALUES ('current_exchange_rate', '4.78')
                     """
                 )
+                cursor.execute(
+                    """
+                    SELECT setting_value
+                    FROM site_settings
+                    WHERE setting_key = 'current_exchange_rate'
+                    LIMIT 1
+                    """
+                )
+                _purchase_rate_row = cursor.fetchone() or {}
+                _purchase_rate_default = str(
+                    _purchase_rate_row.get("setting_value") or "4.78"
+                )
+                cursor.execute(
+                    """
+                    INSERT IGNORE INTO site_settings (setting_key, setting_value)
+                    VALUES ('payment_exchange_rate', %s)
+                    """,
+                    (_purchase_rate_default,),
+                )
             conn.commit()
             _customer_balance_schema_ready = True
         except Exception:
@@ -334,17 +353,41 @@ def normalize_customer_payment_method(value) -> str:
     return method
 
 
-def current_customer_exchange_rate(cursor) -> Decimal:
+def is_payment_order_customer(customer_name: str) -> bool:
+    return str(customer_name or "").strip() == "代付"
+
+
+def current_customer_exchange_rate(cursor, customer_name: str = "") -> Decimal:
+    """新增訂單的定價匯率。
+
+    客戶姓名完全等於「代付」→ 使用 payment_exchange_rate。
+    其他訂單 → 使用 current_exchange_rate（代購匯率 / 前台顯示匯率）。
+    若代付匯率尚未建立，安全退回目前代購匯率。
+    """
+    use_payment_rate = is_payment_order_customer(customer_name)
+    setting_key = "payment_exchange_rate" if use_payment_rate else "current_exchange_rate"
+
     cursor.execute(
-        "SELECT setting_value FROM site_settings WHERE setting_key = 'current_exchange_rate' LIMIT 1"
+        "SELECT setting_value FROM site_settings WHERE setting_key = %s LIMIT 1",
+        (setting_key,),
     )
     row = cursor.fetchone() or {}
+
+    fallback = "4.78"
+    if use_payment_rate and not row.get("setting_value"):
+        cursor.execute(
+            "SELECT setting_value FROM site_settings "
+            "WHERE setting_key = 'current_exchange_rate' LIMIT 1"
+        )
+        purchase_row = cursor.fetchone() or {}
+        fallback = str(purchase_row.get("setting_value") or "4.78")
+
     try:
-        rate = Decimal(str(row.get("setting_value") or "4.78"))
+        rate = Decimal(str(row.get("setting_value") or fallback))
     except InvalidOperation:
-        rate = Decimal("4.78")
+        rate = Decimal(str(fallback))
     if not rate.is_finite() or rate <= 0:
-        rate = Decimal("4.78")
+        rate = Decimal(str(fallback))
     return rate.quantize(Decimal("0.0001"))
 
 
@@ -2462,7 +2505,7 @@ def new_order_page_context(**updates):
                 )
             context["customer_names"] = sorted(names)
             context["member_level"] = member_level_for_name(cursor, context["customer_name"])
-            context["current_exchange_rate"] = current_customer_exchange_rate(cursor)
+            context["current_exchange_rate"] = current_customer_exchange_rate(cursor, context["customer_name"])
             member = member_identity_for_name(cursor, str(context.get("customer_name") or "").strip())
             if member:
                 cursor.execute(
@@ -2492,6 +2535,9 @@ def new_order_page_context(**updates):
             "calculated_fee": fee,
             "vip_discount": discount,
             "customer_total_twd": total,
+            "order_type_label": (
+                "代付" if is_payment_order_customer(context.get("customer_name")) else "代購"
+            ),
         })
     except HTTPException:
         context.update({
@@ -2537,7 +2583,7 @@ def new_order_fee(
     try:
         with conn.cursor() as cursor:
             level = member_level_for_name(cursor, customer_name.strip())
-            rate = current_customer_exchange_rate(cursor)
+            rate = current_customer_exchange_rate(cursor, customer_name.strip())
             member = member_identity_for_name(cursor, customer_name.strip())
             balance = Decimal("0.00")
             if member:
@@ -2561,6 +2607,7 @@ def new_order_fee(
             "vip_discount": discount,
             "customer_payment_method": method,
             "customer_payment_label": CUSTOMER_PAYMENT_METHODS[method],
+            "order_type_label": "代付" if is_payment_order_customer(customer_name) else "代購",
             "current_exchange_rate": rate,
             "customer_total_twd": total,
             "member_balance": balance,
@@ -2654,7 +2701,7 @@ def create_order(
                 raise RuntimeError("新增或讀取會員失敗")
             member_id = int(member["member_id"])
             level = str(member.get("member_level") or "一般會員")
-            rate = current_customer_exchange_rate(cursor)
+            rate = current_customer_exchange_rate(cursor, name)
             original_fee, fee, discount = customer_fee_for_payment(
                 amount, level, platform, customer_method
             )
@@ -6230,6 +6277,25 @@ def ensure_frontend_config_tables_admin():
                 VALUES ('current_exchange_rate', '4.78')
                 """
             )
+            cursor.execute(
+                """
+                SELECT setting_value
+                FROM site_settings
+                WHERE setting_key = 'current_exchange_rate'
+                LIMIT 1
+                """
+            )
+            _purchase_rate_row = cursor.fetchone() or {}
+            _purchase_rate_default = str(
+                _purchase_rate_row.get("setting_value") or "4.78"
+            )
+            cursor.execute(
+                """
+                INSERT IGNORE INTO site_settings (setting_key, setting_value)
+                VALUES ('payment_exchange_rate', %s)
+                """,
+                (_purchase_rate_default,),
+            )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -6247,7 +6313,11 @@ def frontend_settings_context(message="", error=""):
                 """
                 SELECT setting_key, setting_value, updated_at
                 FROM site_settings
-                WHERE setting_key IN ('orders_last_update_time', 'current_exchange_rate')
+                WHERE setting_key IN (
+                    'orders_last_update_time',
+                    'current_exchange_rate',
+                    'payment_exchange_rate'
+                )
                 """
             )
             setting_rows = cursor.fetchall()
@@ -6274,6 +6344,16 @@ def frontend_settings_context(message="", error=""):
     except (TypeError, ValueError):
         current_rate = 4.78
 
+    payment_rate_value = settings.get("payment_exchange_rate", {}).get("setting_value")
+    try:
+        payment_rate = (
+            float(payment_rate_value)
+            if payment_rate_value is not None
+            else current_rate
+        )
+    except (TypeError, ValueError):
+        payment_rate = current_rate
+
     for row in batches:
         row["delivery_label"] = FRONTEND_DELIVERY_TYPES.get(
             row.get("delivery_type"), "宅配"
@@ -6285,6 +6365,8 @@ def frontend_settings_context(message="", error=""):
         "orders_last_update_updated_at": settings.get("orders_last_update_time", {}).get("updated_at"),
         "current_rate": current_rate,
         "rate_updated_at": settings.get("current_exchange_rate", {}).get("updated_at"),
+        "payment_rate": payment_rate,
+        "payment_rate_updated_at": settings.get("payment_exchange_rate", {}).get("updated_at"),
         "batches": batches,
         "delivery_types": FRONTEND_DELIVERY_TYPES,
         "message": str(message or ""),
@@ -6377,7 +6459,43 @@ def frontend_save_exchange_rate(
         raise
     finally:
         conn.close()
-    return _frontend_redirect(message=f"前台顯示匯率已更新為 {rate_text}。")
+    return _frontend_redirect(message=f"代購匯率已更新為 {rate_text}。")
+
+
+@app.post("/frontend-settings/payment-exchange-rate")
+def frontend_save_payment_exchange_rate(
+    request: Request,
+    payment_exchange_rate: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+    try:
+        rate = Decimal(str(payment_exchange_rate).strip())
+    except (InvalidOperation, ValueError):
+        return _frontend_redirect(error="代付匯率格式不正確。")
+    if not rate.is_finite() or rate <= 0 or rate > Decimal("20"):
+        return _frontend_redirect(error="代付匯率必須大於 0。")
+    rate_text = format(rate.quantize(Decimal("0.01")), "f")
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO site_settings (setting_key, setting_value)
+                VALUES ('payment_exchange_rate', %s)
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+                """,
+                (rate_text,),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return _frontend_redirect(message=f"代付匯率已更新為 {rate_text}。")
 
 
 @app.post("/frontend-settings/batches/add")
