@@ -232,6 +232,221 @@ def parse_card_cost(value, *, amount_rmb=None, required=False):
 
 
 # =========================================================
+# 客戶付款方式 / 會員餘額
+# =========================================================
+
+CUSTOMER_PAYMENT_METHODS = {
+    "bank_transfer": "銀行轉帳",
+    "balance": "餘額扣款",
+    "cod": "貨到付款",
+}
+
+_customer_balance_schema_lock = threading.Lock()
+_customer_balance_schema_ready = False
+
+
+def ensure_customer_payment_balance_schema():
+    """補上客戶付款快照、會員餘額與餘額流水。
+
+    舊訂單不強制補 customer_payment_method，避免把歷史訂單誤判成特定付款方式。
+    """
+    global _customer_balance_schema_ready
+    if _customer_balance_schema_ready:
+        return
+    with _customer_balance_schema_lock:
+        if _customer_balance_schema_ready:
+            return
+        conn = get_db()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SHOW COLUMNS FROM orders")
+                existing = {row["Field"] for row in cursor.fetchall()}
+                additions = {
+                    "customer_payment_method": "VARCHAR(30) NULL",
+                    "customer_exchange_rate": "DECIMAL(10,4) NULL",
+                    "customer_total_twd": "DECIMAL(12,2) NULL",
+                    "balance_deducted_twd": "DECIMAL(12,2) NOT NULL DEFAULT 0",
+                    "balance_member_id": "INT NULL",
+                }
+                for name, ddl in additions.items():
+                    if name not in existing:
+                        cursor.execute(f"ALTER TABLE orders ADD COLUMN {name} {ddl}")
+
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS member_balances (
+                        member_id INT NOT NULL,
+                        balance DECIMAL(12,2) NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (member_id)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS member_balance_logs (
+                        log_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        member_id INT NOT NULL,
+                        change_amount DECIMAL(12,2) NOT NULL,
+                        balance_before DECIMAL(12,2) NOT NULL,
+                        balance_after DECIMAL(12,2) NOT NULL,
+                        action_type VARCHAR(40) NOT NULL,
+                        order_id INT NULL,
+                        note VARCHAR(255) NULL,
+                        admin_username VARCHAR(100) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (log_id),
+                        INDEX idx_balance_member (member_id, created_at),
+                        INDEX idx_balance_order (order_id)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS site_settings (
+                        setting_key VARCHAR(100) PRIMARY KEY,
+                        setting_value TEXT NULL,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                    """
+                )
+                cursor.execute(
+                    """
+                    INSERT IGNORE INTO site_settings (setting_key, setting_value)
+                    VALUES ('current_exchange_rate', '4.78')
+                    """
+                )
+            conn.commit()
+            _customer_balance_schema_ready = True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def normalize_customer_payment_method(value) -> str:
+    method = str(value or "").strip().lower()
+    if method not in CUSTOMER_PAYMENT_METHODS:
+        return "bank_transfer"
+    return method
+
+
+def current_customer_exchange_rate(cursor) -> Decimal:
+    cursor.execute(
+        "SELECT setting_value FROM site_settings WHERE setting_key = 'current_exchange_rate' LIMIT 1"
+    )
+    row = cursor.fetchone() or {}
+    try:
+        rate = Decimal(str(row.get("setting_value") or "4.78"))
+    except InvalidOperation:
+        rate = Decimal("4.78")
+    if not rate.is_finite() or rate <= 0:
+        rate = Decimal("4.78")
+    return rate.quantize(Decimal("0.0001"))
+
+
+def member_identity_for_name(cursor, name: str, *, lock=False):
+    suffix = " FOR UPDATE" if lock else ""
+    cursor.execute(
+        f"SELECT member_id, member_level FROM members WHERE customer_name = %s LIMIT 1{suffix}",
+        (name,),
+    )
+    return cursor.fetchone()
+
+
+def member_balance_locked(cursor, member_id: int) -> Decimal:
+    cursor.execute(
+        "INSERT IGNORE INTO member_balances (member_id, balance) VALUES (%s, 0)",
+        (member_id,),
+    )
+    cursor.execute(
+        "SELECT balance FROM member_balances WHERE member_id = %s FOR UPDATE",
+        (member_id,),
+    )
+    row = cursor.fetchone() or {}
+    return Decimal(str(row.get("balance") or 0)).quantize(Decimal("0.01"))
+
+
+def change_member_balance(
+    cursor,
+    *,
+    member_id: int,
+    change_amount: Decimal,
+    action_type: str,
+    admin_username: str,
+    order_id=None,
+    note=None,
+    prevent_negative=True,
+):
+    change = Decimal(str(change_amount)).quantize(Decimal("0.01"))
+    before = member_balance_locked(cursor, member_id)
+    after = (before + change).quantize(Decimal("0.01"))
+    if prevent_negative and after < 0:
+        shortage = (-after).quantize(Decimal("0.01"))
+        raise HTTPException(
+            status_code=409,
+            detail=f"會員餘額不足，目前 NT${before:.2f}，尚差 NT${shortage:.2f}",
+        )
+    cursor.execute(
+        "UPDATE member_balances SET balance = %s WHERE member_id = %s",
+        (after, member_id),
+    )
+    cursor.execute(
+        """
+        INSERT INTO member_balance_logs
+        (member_id, change_amount, balance_before, balance_after,
+         action_type, order_id, note, admin_username)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+        """,
+        (
+            member_id, change, before, after, action_type, order_id,
+            (str(note).strip()[:255] if note else None), admin_username,
+        ),
+    )
+    return before, after
+
+
+def customer_fee_for_payment(amount: Decimal, level: str, platform: str, payment_method: str):
+    base, vip_fee, vip_discount = calculate_add_fee(amount, level, platform)
+    method = normalize_customer_payment_method(payment_method)
+    if method == "cod":
+        return base, Decimal("60.00"), Decimal("1.00")
+    if method == "balance":
+        return base, vip_fee.quantize(Decimal("0.01")), vip_discount
+    return base, base.quantize(Decimal("0.01")), Decimal("1.00")
+
+
+def customer_total_for_order(amount: Decimal, rate: Decimal, fee: Decimal) -> Decimal:
+    return (amount * rate + fee).quantize(Decimal("0.01"))
+
+
+def refund_order_balance_for_delete(cursor, old_order, admin_username: str):
+    deducted = Decimal(str(old_order.get("balance_deducted_twd") or 0)).quantize(Decimal("0.01"))
+    if deducted <= 0:
+        return Decimal("0.00")
+    member_id = old_order.get("balance_member_id")
+    if not member_id:
+        member = member_identity_for_name(cursor, str(old_order.get("customer_name") or ""), lock=True)
+        member_id = member.get("member_id") if member else None
+    if not member_id:
+        raise HTTPException(status_code=409, detail="找不到此餘額扣款訂單的會員，無法安全退款")
+    change_member_balance(
+        cursor,
+        member_id=int(member_id),
+        change_amount=deducted,
+        action_type="order_delete_refund",
+        admin_username=admin_username,
+        order_id=old_order.get("order_id"),
+        note="刪除訂單，自動退回原餘額扣款",
+        prevent_negative=False,
+    )
+    return deducted
+
+
+# =========================================================
 # Fetch Single Order
 # =========================================================
 
@@ -240,6 +455,7 @@ def fetch_order(
 ):
 
     ensure_order_cost_columns()
+    ensure_customer_payment_balance_schema()
     conn = get_db()
 
     try:
@@ -257,6 +473,11 @@ def fetch_order(
                     amount_rmb,
                     purchase_payment_method,
                     card_cost_twd,
+                    customer_payment_method,
+                    customer_exchange_rate,
+                    customer_total_twd,
+                    balance_deducted_twd,
+                    balance_member_id,
                     weight_kg,
                     is_arrived,
                     is_returned,
@@ -589,7 +810,22 @@ AUDIT_FIELD_LABELS = {
         "訂單狀態",
 
     "cancel_note":
-        "取消原因"
+        "取消原因",
+
+    "customer_payment_method":
+        "客戶付款方式",
+
+    "customer_exchange_rate":
+        "客戶定價匯率",
+
+    "customer_total_twd":
+        "客戶應付台幣",
+
+    "balance_deducted_twd":
+        "餘額實扣",
+
+    "balance_member_id":
+        "餘額會員編號"
 }
 
 
@@ -1791,6 +2027,7 @@ async def delete_order(
 
 
 
+    ensure_customer_payment_balance_schema()
     ensure_audit_storage()
 
     conn = get_db()
@@ -1833,6 +2070,9 @@ async def delete_order(
                 order_id=order_id,
                 admin_username=admin,
             )
+
+            # 餘額扣款訂單刪除時，退回「實際曾扣除」的台幣金額。
+            refund_order_balance_for_delete(cursor, old_order, admin)
 
             # Delete
             cursor.execute(
@@ -2036,6 +2276,7 @@ async def restore_deleted_order(
     admin: str = Depends(verify_admin),
 ):
     _check_same_origin(request)
+    ensure_customer_payment_balance_schema()
     ensure_audit_storage()
     conn = get_db()
     try:
@@ -2078,20 +2319,28 @@ async def restore_deleted_order(
                 c["Field"] for c in schema
                 if "GENERATED" not in (c.get("Extra") or "").upper()
             }
-            # A partial/outdated snapshot must not silently produce a different order.
-            if set(snapshot) != live_columns:
+            # 允許資料表之後新增「可使用預設值 / NULL」的欄位，
+            # 這樣 v3.7 上線前的刪除快照仍可復原。
+            if not set(snapshot).issubset(live_columns):
                 raise HTTPException(
                     status_code=409,
-                    detail="刪除時的欄位與目前訂單表不同；請先備份並人工確認，未執行復原",
+                    detail="刪除快照含有目前不存在的欄位；未執行復原",
                 )
 
-            fields = [col["Field"] for col in schema if col["Field"] in live_columns]
+            fields = [col["Field"] for col in schema if col["Field"] in snapshot]
             columns_sql = ", ".join("`" + field.replace("`", "``") + "`" for field in fields)
             placeholders = ", ".join(["%s"] * len(fields))
             cursor.execute(
                 f"INSERT INTO orders ({columns_sql}) VALUES ({placeholders})",
                 [snapshot[field] for field in fields],
             )
+
+            # 復原只恢復訂單本身，不自動重新扣會員餘額。
+            if "balance_deducted_twd" in live_columns:
+                cursor.execute(
+                    "UPDATE orders SET balance_deducted_twd = 0, balance_member_id = NULL WHERE order_id = %s",
+                    (order_id,),
+                )
             new_order = fetch_locked_order(cursor, order_id)
             write_audit_log(
                 cursor=cursor,
@@ -2179,6 +2428,9 @@ def add_order_context(**updates):
         "amount_rmb": "0.00",
         "purchase_payment_method": "alipay",
         "card_cost_twd": "",
+        "customer_payment_method": "bank_transfer",
+        "current_exchange_rate": Decimal("4.7800"),
+        "member_balance": Decimal("0.00"),
         "weight_kg": "0.00",
         "is_arrived": False,
         "is_returned": False,
@@ -2193,12 +2445,11 @@ def add_order_context(**updates):
 
 def new_order_page_context(**updates):
     ensure_order_cost_columns()
+    ensure_customer_payment_balance_schema()
     context = add_order_context(**updates)
     conn = get_db()
     try:
         with conn.cursor() as cursor:
-            # members 與 orders 的 customer_name 可能使用不同 collation；
-            # 不在 SQL 用 UNION 合併，以免 MySQL 1271 Illegal mix of collations。
             names = set()
             for source in ("members", "orders"):
                 cursor.execute(
@@ -2211,18 +2462,44 @@ def new_order_page_context(**updates):
                 )
             context["customer_names"] = sorted(names)
             context["member_level"] = member_level_for_name(cursor, context["customer_name"])
+            context["current_exchange_rate"] = current_customer_exchange_rate(cursor)
+            member = member_identity_for_name(cursor, str(context.get("customer_name") or "").strip())
+            if member:
+                cursor.execute(
+                    "SELECT balance FROM member_balances WHERE member_id = %s LIMIT 1",
+                    (member["member_id"],),
+                )
+                balance_row = cursor.fetchone() or {}
+                context["member_balance"] = Decimal(str(balance_row.get("balance") or 0)).quantize(Decimal("0.01"))
+            else:
+                context["member_balance"] = Decimal("0.00")
     finally:
         conn.close()
     context["platforms"] = ORDER_PLATFORMS
+    context["customer_payment_methods"] = CUSTOMER_PAYMENT_METHODS
     amount = context["amount_rmb"]
     try:
         amount_dec = valid_add_amount(str(amount), "人民幣金額", "99999999.99")
-        base, fee, discount = calculate_add_fee(
-            amount_dec, context["member_level"], context["platform"]
+        base, fee, discount = customer_fee_for_payment(
+            amount_dec,
+            context["member_level"],
+            context["platform"],
+            context.get("customer_payment_method"),
         )
-        context.update({"base_fee": base, "calculated_fee": fee, "vip_discount": discount})
+        total = customer_total_for_order(amount_dec, context["current_exchange_rate"], fee)
+        context.update({
+            "base_fee": base,
+            "calculated_fee": fee,
+            "vip_discount": discount,
+            "customer_total_twd": total,
+        })
     except HTTPException:
-        context.update({"base_fee": None, "calculated_fee": None, "vip_discount": None})
+        context.update({
+            "base_fee": None,
+            "calculated_fee": None,
+            "vip_discount": None,
+            "customer_total_twd": None,
+        })
     return context
 
 
@@ -2239,13 +2516,16 @@ def new_order_fee(
     customer_name: str = "",
     platform: str = "集運",
     amount_rmb: str = "0",
+    customer_payment_method: str = "bank_transfer",
     admin: str = Depends(verify_admin),
 ):
+    ensure_customer_payment_balance_schema()
     if platform not in ORDER_PLATFORMS:
         return templates.TemplateResponse(
             request=request, name="new_order_fee.html",
             context={"error_message": "請選擇有效的平台"},
         )
+    method = normalize_customer_payment_method(customer_payment_method)
     try:
         amount = valid_add_amount(amount_rmb or "0", "人民幣金額", "99999999.99")
     except HTTPException as exc:
@@ -2257,14 +2537,36 @@ def new_order_fee(
     try:
         with conn.cursor() as cursor:
             level = member_level_for_name(cursor, customer_name.strip())
+            rate = current_customer_exchange_rate(cursor)
+            member = member_identity_for_name(cursor, customer_name.strip())
+            balance = Decimal("0.00")
+            if member:
+                cursor.execute(
+                    "SELECT balance FROM member_balances WHERE member_id = %s LIMIT 1",
+                    (member["member_id"],),
+                )
+                row = cursor.fetchone() or {}
+                balance = Decimal(str(row.get("balance") or 0)).quantize(Decimal("0.01"))
     finally:
         conn.close()
-    base, fee, discount = calculate_add_fee(amount, level, platform)
+    base, fee, discount = customer_fee_for_payment(amount, level, platform, method)
+    total = customer_total_for_order(amount, rate, fee)
     return templates.TemplateResponse(
-        request=request, name="new_order_fee.html",
-        context={"member_level": level, "base_fee": base,
-                 "calculated_fee": fee, "vip_discount": discount,
-                 "error_message": ""},
+        request=request,
+        name="new_order_fee.html",
+        context={
+            "member_level": level,
+            "base_fee": base,
+            "calculated_fee": fee,
+            "vip_discount": discount,
+            "customer_payment_method": method,
+            "customer_payment_label": CUSTOMER_PAYMENT_METHODS[method],
+            "current_exchange_rate": rate,
+            "customer_total_twd": total,
+            "member_balance": balance,
+            "balance_enough": balance >= total,
+            "error_message": "",
+        },
     )
 
 
@@ -2278,6 +2580,7 @@ def create_order(
     amount_rmb: str = Form("0"),
     purchase_payment_method: str = Form("alipay"),
     card_cost_twd: str = Form(""),
+    customer_payment_method: str = Form("bank_transfer"),
     weight_kg: str = Form("0"),
     is_arrived: Optional[str] = Form(None),
     is_returned: Optional[str] = Form(None),
@@ -2291,10 +2594,12 @@ def create_order(
     notes = remarks.strip()
     keep_name = keep_last_name == "1"
     purchase_method = normalize_purchase_payment_method(purchase_payment_method)
+    customer_method = normalize_customer_payment_method(customer_payment_method)
     inputs = dict(order_time=order_time, customer_name=name, platform=platform,
                   tracking_number=tracking, amount_rmb=amount_rmb,
                   purchase_payment_method=purchase_method,
                   card_cost_twd=card_cost_twd,
+                  customer_payment_method=customer_method,
                   weight_kg=weight_kg, is_arrived=is_arrived == "1",
                   is_returned=is_returned == "1", remarks=remarks,
                   keep_last_name=keep_name)
@@ -2334,33 +2639,69 @@ def create_order(
 
     # DDL should not run in an order transaction; fail closed if auditing is unavailable.
     ensure_order_cost_columns()
+    ensure_customer_payment_balance_schema()
     ensure_audit_storage()
     conn = get_db()
     try:
         with conn.cursor() as cursor:
-            level = member_level_for_name(cursor, name)
-            original_fee, fee, discount = calculate_add_fee(amount, level, platform)
-            # Mirror the old Streamlit INSERT column set and recompute the fee server-side.
-            cursor.execute(
-                """INSERT INTO orders
-                   (order_time, customer_name, platform, tracking_number,
-                    amount_rmb, purchase_payment_method, card_cost_twd,
-                    weight_kg, is_arrived, is_returned, service_fee, remarks)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (date_value, name, platform, tracking or None, amount,
-                 purchase_method, card_cost, weight,
-                 int(is_arrived == "1"), int(is_returned == "1"), fee, notes or None),
-            )
-            new_id = cursor.lastrowid
+            # 先確保會員存在，餘額扣款才有固定 member_id 可追蹤。
             cursor.execute(
                 "INSERT IGNORE INTO members (customer_name) VALUES (%s)",
                 (name,),
             )
+            member = member_identity_for_name(cursor, name, lock=True)
+            if not member:
+                raise RuntimeError("新增或讀取會員失敗")
+            member_id = int(member["member_id"])
+            level = str(member.get("member_level") or "一般會員")
+            rate = current_customer_exchange_rate(cursor)
+            original_fee, fee, discount = customer_fee_for_payment(
+                amount, level, platform, customer_method
+            )
+            total_twd = customer_total_for_order(amount, rate, fee)
+
+            cursor.execute(
+                """INSERT INTO orders
+                   (order_time, customer_name, platform, tracking_number,
+                    amount_rmb, purchase_payment_method, card_cost_twd,
+                    customer_payment_method, customer_exchange_rate, customer_total_twd,
+                    balance_deducted_twd, balance_member_id,
+                    weight_kg, is_arrived, is_returned, service_fee, remarks,
+                    exchange_rate, member_level_snapshot, original_service_fee,
+                    vip_discount_rate, final_service_fee)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (date_value, name, platform, tracking or None, amount,
+                 purchase_method, card_cost, customer_method, rate, total_twd,
+                 Decimal("0.00"), (member_id if customer_method == "balance" else None),
+                 weight, int(is_arrived == "1"), int(is_returned == "1"), fee, notes or None,
+                 rate, level, original_fee, discount, fee),
+            )
+            new_id = cursor.lastrowid
+
+            if customer_method == "balance":
+                change_member_balance(
+                    cursor,
+                    member_id=member_id,
+                    change_amount=-total_twd,
+                    action_type="order_balance_payment",
+                    admin_username=admin,
+                    order_id=new_id,
+                    note=f"訂單 #{new_id} 餘額扣款",
+                    prevent_negative=True,
+                )
+                cursor.execute(
+                    "UPDATE orders SET balance_deducted_twd = %s WHERE order_id = %s",
+                    (total_twd, new_id),
+                )
+
             new_order = fetch_locked_order(cursor, new_id)
             if not new_order:
                 raise RuntimeError("新增後無法讀取訂單，已取消交易")
             write_audit_log(cursor, new_id, "CREATE", admin, None, new_order)
         conn.commit()
+    except HTTPException as exc:
+        conn.rollback()
+        return bad(exc.detail)
     except Exception:
         conn.rollback()
         raise
@@ -3540,6 +3881,7 @@ def fetch_member_admin(member_id: int):
 
 def member_detail_context(member_id: int):
     ensure_rewards_tables()
+    ensure_customer_payment_balance_schema()
     member = fetch_member_admin(member_id)
     if not member:
         raise HTTPException(status_code=404, detail="找不到會員")
@@ -3597,6 +3939,26 @@ def member_detail_context(member_id: int):
                 (member_id,),
             )
             member_coupons = cursor.fetchall()
+
+            cursor.execute(
+                "SELECT balance FROM member_balances WHERE member_id = %s LIMIT 1",
+                (member_id,),
+            )
+            balance_row = cursor.fetchone() or {}
+            balance_twd = Decimal(str(balance_row.get("balance") or 0)).quantize(Decimal("0.01"))
+
+            cursor.execute(
+                """
+                SELECT log_id, change_amount, balance_before, balance_after,
+                       action_type, order_id, note, admin_username, created_at
+                FROM member_balance_logs
+                WHERE member_id = %s
+                ORDER BY log_id DESC
+                LIMIT 30
+                """,
+                (member_id,),
+            )
+            balance_logs = cursor.fetchall()
     finally:
         conn.close()
     stats["order_count"] = int(stats.get("order_count") or 0)
@@ -3610,6 +3972,8 @@ def member_detail_context(member_id: int):
         "member_levels": MEMBER_LEVELS,
         "points_balance": points_balance,
         "member_coupons": member_coupons,
+        "balance_twd": balance_twd,
+        "balance_logs": balance_logs,
     }
 
 
@@ -3723,6 +4087,75 @@ def member_edit_save(
         request=request,
         name="member_detail.html",
         context={**member_detail_context(member_id), "message": "會員資料已更新。"},
+    )
+
+
+@app.post("/members/{member_id}/balance/adjust")
+def member_balance_adjust(
+    request: Request,
+    member_id: int,
+    operation: str = Form("recharge"),
+    amount_twd: str = Form(""),
+    note: str = Form(""),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_members_table_admin()
+    ensure_customer_payment_balance_schema()
+    operation = str(operation or "").strip()
+    if operation not in ("recharge", "add", "subtract"):
+        raise HTTPException(status_code=422, detail="餘額異動類型不正確")
+    try:
+        amount = Decimal(str(amount_twd).strip()).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=422, detail="請輸入正確的台幣金額")
+    if not amount.is_finite() or amount <= 0 or amount > Decimal("999999999.99"):
+        raise HTTPException(status_code=422, detail="餘額異動金額超出可接受範圍")
+    note_value = str(note or "").strip()[:255]
+    change = -amount if operation == "subtract" else amount
+    action_type = {
+        "recharge": "recharge",
+        "add": "manual_add",
+        "subtract": "manual_subtract",
+    }[operation]
+    label = {
+        "recharge": "儲值",
+        "add": "手動增加",
+        "subtract": "手動扣款",
+    }[operation]
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT member_id FROM members WHERE member_id = %s FOR UPDATE",
+                (member_id,),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="找不到會員")
+            before, after = change_member_balance(
+                cursor,
+                member_id=member_id,
+                change_amount=change,
+                action_type=action_type,
+                admin_username=admin,
+                note=note_value or label,
+                prevent_negative=True,
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="member_detail.html",
+        context={
+            **member_detail_context(member_id),
+            "message": f"{label}完成：NT${amount:.2f}，目前餘額 NT${after:.2f}",
+        },
     )
 
 
