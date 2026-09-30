@@ -2,6 +2,7 @@
 <div class="create-error">{{ error_message }}</div>
 {% else %}
 <div class="fee-preview-grid">
+  <div><span>訂單類型</span><strong>{{ order_type_label or '代購' }}</strong></div>
   <div><span>會員等級</span><strong>{{ member_level or '一般會員' }}</strong></div>
   <div><span>客戶付款</span><strong>{{ customer_payment_label or '銀行轉帳' }}</strong></div>
   <div><span>本單定價匯率</span><strong>{{ '%.4f'|format(current_exchange_rate|float) }}</strong></div>

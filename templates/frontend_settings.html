@@ -35,15 +35,31 @@
     <div class="frontend-card-head">
       <div class="frontend-card-icon"><i class="bi bi-currency-exchange"></i></div>
       <div>
-        <h2>前台顯示匯率</h2>
+        <h2>代購匯率</h2>
       </div>
     </div>
     <form method="post" action="/frontend-settings/exchange-rate" class="frontend-rate-form">
       <label>
-        <span>目前匯率</span>
+        <span>目前代購匯率</span>
         <input type="number" name="exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(current_rate) }}" required>
       </label>
-      <button type="submit" class="frontend-primary"><i class="bi bi-floppy"></i><span>儲存匯率</span></button>
+      <button type="submit" class="frontend-primary"><i class="bi bi-floppy"></i><span>儲存代購匯率</span></button>
+    </form>
+  </section>
+
+  <section class="frontend-card">
+    <div class="frontend-card-head">
+      <div class="frontend-card-icon"><i class="bi bi-currency-yen"></i></div>
+      <div>
+        <h2>代付匯率</h2>
+      </div>
+    </div>
+    <form method="post" action="/frontend-settings/payment-exchange-rate" class="frontend-rate-form">
+      <label>
+        <span>目前代付匯率</span>
+        <input type="number" name="payment_exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(payment_rate) }}" required>
+      </label>
+      <button type="submit" class="frontend-primary"><i class="bi bi-floppy"></i><span>儲存代付匯率</span></button>
     </form>
   </section>
 </div>
