@@ -5,7 +5,7 @@ import threading
 import logging
 import re
 
-from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN, ROUND_CEILING
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN, ROUND_HALF_UP
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -463,7 +463,11 @@ def customer_fee_for_payment(amount: Decimal, level: str, platform: str, payment
 
 
 def customer_total_for_order(amount: Decimal, rate: Decimal, fee: Decimal) -> Decimal:
-    return (amount * rate + fee).quantize(Decimal("0.01"))
+    """客戶應收台幣以元為單位四捨五入。"""
+    return (amount * rate + fee).quantize(
+        Decimal("1"),
+        rounding=ROUND_HALF_UP,
+    )
 
 
 def refund_order_balance_for_delete(cursor, old_order, admin_username: str):
