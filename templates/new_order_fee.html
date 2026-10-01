@@ -7,7 +7,7 @@
   <div><span>客戶付款</span><strong>{{ customer_payment_label or '銀行轉帳' }}</strong></div>
   <div><span>本單定價匯率</span><strong>{{ '%.4f'|format(current_exchange_rate|float) }}</strong></div>
   <div><span>本單手續費</span><strong>NT$ {{ '%.2f'|format(calculated_fee|float) }}</strong></div>
-  <div><span>本單應收台幣</span><strong>NT$ {{ '%.2f'|format(customer_total_twd|float) }}</strong></div>
+  <div><span>本單應收台幣</span><strong>NT$ {{ '%.0f'|format(customer_total_twd|float) }}</strong></div>
   {% if customer_payment_method == 'balance' %}
   <div><span>會員目前餘額</span><strong>NT$ {{ '%.2f'|format(member_balance|float) }}</strong></div>
   {% endif %}
@@ -16,7 +16,7 @@
 <div class="fee-rule-note">銀行轉帳：使用一般手續費，不套用 VIP 折扣。</div>
 {% elif customer_payment_method == 'balance' %}
   {% if balance_enough %}
-  <div class="fee-rule-note success">餘額扣款：套用會員折扣；新增成功後扣除 NT$ {{ '%.2f'|format(customer_total_twd|float) }}。</div>
+  <div class="fee-rule-note success">餘額扣款：套用會員折扣；新增成功後扣除 NT$ {{ '%.0f'|format(customer_total_twd|float) }}。</div>
   {% else %}
   <div class="fee-rule-note danger">餘額不足，新增時會阻擋此筆訂單。</div>
   {% endif %}
