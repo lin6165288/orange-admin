@@ -3993,3 +3993,67 @@ summary .auto-line-icon { margin-right: .42em; }
 @media(max-width:700px){
     .return-request-metrics{grid-template-columns:1fr}
 }
+
+
+/* ======================================================
+   Frontend Settings v3.14 compact layout
+====================================================== */
+.frontend-quick-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:20px}
+.frontend-quick-card{min-height:86px;display:flex;align-items:center;gap:12px;padding:14px 15px;background:#fff;border:1px solid #ececec;border-radius:14px;box-shadow:0 4px 14px rgba(17,24,39,.025)}
+.frontend-quick-icon{width:38px;height:38px;flex:0 0 38px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:#fff7ee;border:1px solid #f1dfc7;color:#f08300;font-size:17px}
+.frontend-quick-main{min-width:0;flex:1}
+.frontend-quick-label{display:block;color:#999;font-size:11px;margin-bottom:5px}
+.frontend-quick-main strong{display:block;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frontend-quick-rate-form{min-width:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:8px}
+.frontend-quick-rate-form label{min-width:0}
+.frontend-quick-rate-form input{width:100%;height:36px;border:1px solid #ddd;border-radius:8px;padding:0 10px;font:inherit;font-size:14px;outline:none}
+.frontend-quick-rate-form input:focus{border-color:#f29a38}
+.frontend-quick-action{height:36px;border:1px solid #ecd2ad;border-radius:8px;background:#fff7ec;color:#b96b00;padding:0 11px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:12px;font-weight:650;cursor:pointer;white-space:nowrap}
+.frontend-content-section{margin-top:14px;padding:18px}
+.frontend-content-head{align-items:center}
+.frontend-content-head p{margin:5px 0 0;color:#999;font-size:12px}
+.frontend-content-create{position:relative;margin-left:auto}
+.frontend-content-create>summary,.frontend-content-edit-toggle>summary{list-style:none}
+.frontend-content-create>summary::-webkit-details-marker,.frontend-content-edit-toggle>summary::-webkit-details-marker{display:none}
+.frontend-content-create-button{height:38px!important;padding:0 13px!important}
+.frontend-editor-panel{position:absolute;z-index:40;right:0;top:48px;width:min(760px,calc(100vw - 340px));min-width:560px;padding:16px;background:#fff;border:1px solid #e7e7e7;border-radius:14px;box-shadow:0 18px 50px rgba(17,24,39,.13)}
+.frontend-editor-panel-edit{top:38px;right:0}
+.frontend-editor-title{font-size:14px;font-weight:750;margin-bottom:13px}
+.frontend-content-editor-form{display:grid;grid-template-columns:140px 140px minmax(220px,1fr) 80px;gap:10px;align-items:end}
+.frontend-content-editor-form .frontend-content-desc-field{grid-column:1/-1}
+.frontend-content-editor-form .frontend-active-check{height:38px;grid-column:1/2}
+.frontend-content-editor-form .frontend-field input,.frontend-content-editor-form .frontend-field select{height:38px}
+.frontend-content-editor-form .frontend-field label{font-size:11px}
+.frontend-content-editor-form textarea{min-height:100px;border:1px solid #ddd;border-radius:9px;background:#fff;padding:10px 12px;font:inherit;resize:vertical;outline:none}
+.frontend-content-editor-form textarea:focus{border-color:#f29a38}
+.frontend-editor-actions{display:flex;justify-content:flex-end;align-items:end;grid-column:2/-1}
+.frontend-editor-actions .frontend-primary,.frontend-editor-actions .frontend-save-btn{height:38px}
+.frontend-content-list-clean{gap:8px;margin-top:14px}
+.frontend-content-row{border:1px solid #ececec;border-radius:13px;background:#fff;padding:13px 14px}
+.frontend-content-row.inactive{background:#fafafa}
+.frontend-content-summary{display:flex;align-items:center;justify-content:space-between;gap:18px}
+.frontend-content-summary-main{min-width:0;flex:1}
+.frontend-content-summary-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px}
+.frontend-content-summary h3{margin:0;font-size:14px;line-height:1.45}
+.frontend-content-summary p{margin:5px 0 0;color:#8c8c8c;font-size:11px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line}
+.frontend-content-empty-copy{font-style:italic;color:#aaa!important}
+.frontend-content-tag{font-size:10px;color:#aa6a12;background:#fff7ee;border:1px solid #f1dfc7;border-radius:999px;padding:3px 7px}
+.frontend-content-side{position:relative;flex:0 0 auto;display:flex;align-items:center;gap:10px}
+.frontend-content-updated{color:#aaa;font-size:10px;white-space:nowrap}
+.frontend-content-edit-toggle{position:relative}
+.frontend-edit-trigger{height:34px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 10px;border:1px solid #e6d2b8;border-radius:8px;background:#fffaf4;color:#a96918;font-size:11px;font-weight:650;cursor:pointer;white-space:nowrap}
+.frontend-editor-delete{margin-top:8px;padding-top:8px;border-top:1px solid #f1f1f1}
+.frontend-batch-section{margin-top:14px}
+@media(max-width:1100px){
+ .frontend-quick-settings{grid-template-columns:1fr 1fr}.frontend-quick-card:first-child{grid-column:1/-1}
+ .frontend-editor-panel{width:min(680px,calc(100vw - 300px));min-width:500px}
+ .frontend-content-updated{display:none}
+}
+@media(max-width:760px){
+ .frontend-quick-settings{grid-template-columns:1fr}.frontend-quick-card:first-child{grid-column:auto}
+ .frontend-content-head{align-items:flex-start}.frontend-content-create{margin-left:0}
+ .frontend-editor-panel,.frontend-editor-panel-edit{position:fixed;left:14px;right:14px;top:80px;width:auto;min-width:0;max-height:calc(100vh - 100px);overflow:auto}
+ .frontend-content-editor-form{grid-template-columns:1fr}
+ .frontend-content-editor-form .frontend-content-desc-field,.frontend-content-editor-form .frontend-active-check,.frontend-editor-actions{grid-column:auto}
+ .frontend-content-summary{align-items:flex-start}.frontend-content-side{flex-direction:column;align-items:flex-end}
+}
