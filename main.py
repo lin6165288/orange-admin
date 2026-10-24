@@ -3506,6 +3506,41 @@ RETURN_REQUEST_STATUS_LABELS = {
 }
 
 
+def return_request_time_taipei(value) -> str:
+    """Railway MySQL TIMESTAMP is stored/read as UTC here; display in Taiwan time."""
+    if not value:
+        return "—"
+
+    dt = value
+
+    if isinstance(value, str):
+        text = value.strip()
+        parsed = None
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+        ):
+            try:
+                parsed = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+        if parsed is None:
+            return text
+        dt = parsed
+
+    if not isinstance(dt, datetime):
+        return str(dt)
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+
+    return dt.astimezone(
+        ZoneInfo("Asia/Taipei")
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def ensure_return_request_tables():
     conn = get_db()
     try:
@@ -3596,7 +3631,12 @@ def return_request_rows(status="pending", customer=""):
     for row in rows:
         row["total_weight_num"] = float(row.get("total_weight") or 0)
         row["estimated_fee_num"] = float(row.get("estimated_fee") or 0)
-        row["status_label"] = RETURN_REQUEST_STATUS_LABELS.get(row.get("status"), row.get("status") or "—")
+        row["status_label"] = RETURN_REQUEST_STATUS_LABELS.get(
+            row.get("status"),
+            row.get("status") or "—",
+        )
+        row["created_at_tw"] = return_request_time_taipei(row.get("created_at"))
+        row["updated_at_tw"] = return_request_time_taipei(row.get("updated_at"))
     return rows
 
 
@@ -3644,6 +3684,7 @@ def fetch_return_request_detail(request_id: int):
                     COALESCE(o.weight_kg, i.weight_kg, 0) AS weight_kg,
                     COALESCE(o.is_arrived, 0) AS is_arrived,
                     COALESCE(o.is_returned, 0) AS is_returned,
+                    COALESCE(o.is_early_returned, 0) AS is_early_returned,
                     COALESCE(o.remarks, '') AS remarks
                 FROM customer_return_request_items i
                 LEFT JOIN orders o ON o.order_id = i.order_id
@@ -3657,8 +3698,19 @@ def fetch_return_request_detail(request_id: int):
         conn.close()
     request_row["total_weight_num"] = float(request_row.get("total_weight") or 0)
     request_row["estimated_fee_num"] = float(request_row.get("estimated_fee") or 0)
+    request_row["status_label"] = RETURN_REQUEST_STATUS_LABELS.get(
+        request_row.get("status"),
+        request_row.get("status") or "—",
+    )
+    request_row["created_at_tw"] = return_request_time_taipei(
+        request_row.get("created_at")
+    )
+    request_row["updated_at_tw"] = return_request_time_taipei(
+        request_row.get("updated_at")
+    )
     for item in items:
         item["weight_num"] = float(item.get("weight_kg") or 0)
+        item["is_early_returned_bool"] = bool(item.get("is_early_returned"))
     return request_row, items
 
 
@@ -3697,6 +3749,7 @@ def shipping_requests_apply(
     action: str = Form(""),
     status_filter: str = Form("pending"),
     customer_filter: str = Form(""),
+    mark_early_return: Optional[str] = Form(None),
     admin: str = Depends(verify_admin),
 ):
     _check_same_origin(request)
@@ -3726,10 +3779,41 @@ def shipping_requests_apply(
             if non_pending:
                 raise HTTPException(status_code=409, detail="部分申請已被處理，請重新整理後再操作")
             cursor.execute(
-                f"UPDATE customer_return_requests SET status = %s WHERE request_id IN ({placeholders}) AND status = 'pending'",
+                f"UPDATE customer_return_requests SET status = %s "
+                f"WHERE request_id IN ({placeholders}) AND status = 'pending'",
                 [action] + ids,
             )
             changed = cursor.rowcount
+
+            early_return_count = 0
+
+            if action == "processed" and mark_early_return == "1":
+                cursor.execute(
+                    f"""
+                    SELECT DISTINCT order_id
+                    FROM customer_return_request_items
+                    WHERE request_id IN ({placeholders})
+                    """,
+                    ids,
+                )
+                item_rows = cursor.fetchall()
+                order_ids = [
+                    int(row["order_id"])
+                    for row in item_rows
+                    if row.get("order_id") is not None
+                ]
+
+                if order_ids:
+                    order_placeholders = ",".join(["%s"] * len(order_ids))
+                    cursor.execute(
+                        f"""
+                        UPDATE orders
+                        SET is_early_returned = 1
+                        WHERE order_id IN ({order_placeholders})
+                        """,
+                        order_ids,
+                    )
+                    early_return_count = cursor.rowcount
         conn.commit()
     except Exception:
         conn.rollback()
@@ -3740,7 +3824,15 @@ def shipping_requests_apply(
     # 回到待處理頁，避免使用者誤以為已處理的申請仍在待辦。
     target_status = "pending" if status_filter in ("pending", "all") else status_filter
     customer_filter = str(customer_filter or "").strip()
-    qs = f"status={quote(target_status)}&customer={quote(customer_filter)}&message={quote(f'已將 {changed} 筆申請標記為{label}。')}"
+    result_message = f"已將 {changed} 筆申請標記為{label}。"
+    if action == "processed" and mark_early_return == "1":
+        result_message += f" 同步將 {early_return_count} 筆訂單標記為提前運回。"
+
+    qs = (
+        f"status={quote(target_status)}"
+        f"&customer={quote(customer_filter)}"
+        f"&message={quote(result_message)}"
+    )
     return RedirectResponse(url=f"/shipping/requests?{qs}", status_code=303)
 
 
