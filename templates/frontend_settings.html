@@ -64,6 +64,119 @@
   </section>
 </div>
 
+
+<section class="frontend-card frontend-content-section">
+  <div class="frontend-section-head">
+    <div>
+      <h2><span class="section-title-icon"><i class="bi bi-megaphone"></i></span>公告與優惠活動</h2>
+    </div>
+  </div>
+
+  <form method="post" action="/frontend-settings/contents/add" class="frontend-content-add">
+    <div class="frontend-field">
+      <label>類型</label>
+      <select name="content_type">
+        <option value="announcement">重要公告</option>
+        <option value="promotion">優惠活動</option>
+      </select>
+    </div>
+
+    <div class="frontend-field">
+      <label>標籤</label>
+      <input type="text" name="tag_label" maxlength="50" placeholder="例如：NOTICE">
+    </div>
+
+    <div class="frontend-field frontend-content-title-field">
+      <label>標題</label>
+      <input type="text" name="title" maxlength="255" required>
+    </div>
+
+    <div class="frontend-field frontend-sort-field">
+      <label>排序</label>
+      <input type="number" name="sort_order" min="0" max="9999" value="0" step="1">
+    </div>
+
+    <div class="frontend-field frontend-content-desc-field">
+      <label>內容</label>
+      <textarea name="description" maxlength="2000" rows="3"></textarea>
+    </div>
+
+    <div class="frontend-content-add-action">
+      <button type="submit" class="frontend-primary">
+        <i class="bi bi-plus-lg"></i><span>新增內容</span>
+      </button>
+    </div>
+  </form>
+
+  {% if contents %}
+  <div class="frontend-content-list">
+    {% for item in contents %}
+    <article class="frontend-content-item {% if not item.is_active_bool %}inactive{% endif %}">
+      <div class="frontend-batch-meta">
+        <span class="frontend-batch-id">#{{ item.content_id }}</span>
+        <span class="frontend-batch-type">{{ item.type_label }}</span>
+        {% if item.is_active_bool %}
+          <span class="frontend-status active">顯示中</span>
+        {% else %}
+          <span class="frontend-status hidden">已隱藏</span>
+        {% endif %}
+        <span class="frontend-batch-updated">更新：{{ item.updated_at }}</span>
+      </div>
+
+      <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/save" class="frontend-content-edit">
+        <div class="frontend-field">
+          <label>類型</label>
+          <select name="content_type">
+            <option value="announcement" {% if item.content_type == 'announcement' %}selected{% endif %}>重要公告</option>
+            <option value="promotion" {% if item.content_type == 'promotion' %}selected{% endif %}>優惠活動</option>
+          </select>
+        </div>
+
+        <div class="frontend-field">
+          <label>標籤</label>
+          <input type="text" name="tag_label" maxlength="50" value="{{ item.tag_label or '' }}">
+        </div>
+
+        <div class="frontend-field frontend-content-title-field">
+          <label>標題</label>
+          <input type="text" name="title" maxlength="255" value="{{ item.title }}" required>
+        </div>
+
+        <div class="frontend-field frontend-sort-field">
+          <label>排序</label>
+          <input type="number" name="sort_order" min="0" max="9999" value="{{ item.sort_order }}" step="1">
+        </div>
+
+        <div class="frontend-field frontend-content-desc-field">
+          <label>內容</label>
+          <textarea name="description" maxlength="2000" rows="3">{{ item.description or '' }}</textarea>
+        </div>
+
+        <label class="frontend-active-check">
+          <input type="checkbox" name="is_active" value="1" {% if item.is_active_bool %}checked{% endif %}>
+          <span>前台顯示</span>
+        </label>
+
+        <button type="submit" class="frontend-save-btn">
+          <i class="bi bi-floppy"></i><span>儲存</span>
+        </button>
+      </form>
+
+      <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/delete"
+            class="frontend-delete-form"
+            onsubmit="return confirm('確定要刪除前台內容 #{{ item.content_id }} 嗎？')">
+        <button type="submit" class="frontend-delete-btn">
+          <i class="bi bi-trash3"></i><span>刪除</span>
+        </button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">目前沒有公告或優惠活動。</div>
+  {% endif %}
+</section>
+
 <section class="frontend-card frontend-batch-section">
   <div class="frontend-section-head">
     <div>
