@@ -68,7 +68,7 @@
 <section class="frontend-card frontend-content-section">
   <div class="frontend-section-head">
     <div>
-      <h2><span class="section-title-icon"><i class="bi bi-megaphone"></i></span>公告與優惠活動</h2>
+      <h2><span class="section-title-icon"><i class="bi bi-megaphone"></i></span>前台內容管理</h2>
     </div>
   </div>
 
@@ -78,6 +78,8 @@
       <select name="content_type">
         <option value="announcement">重要公告</option>
         <option value="promotion">優惠活動</option>
+        <option value="faq">FAQ</option>
+        <option value="terms">交易須知</option>
       </select>
     </div>
 
@@ -129,6 +131,8 @@
           <select name="content_type">
             <option value="announcement" {% if item.content_type == 'announcement' %}selected{% endif %}>重要公告</option>
             <option value="promotion" {% if item.content_type == 'promotion' %}selected{% endif %}>優惠活動</option>
+            <option value="faq" {% if item.content_type == 'faq' %}selected{% endif %}>FAQ</option>
+            <option value="terms" {% if item.content_type == 'terms' %}selected{% endif %}>交易須知</option>
           </select>
         </div>
 
