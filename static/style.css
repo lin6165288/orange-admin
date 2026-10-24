@@ -3970,24 +3970,10 @@ summary .auto-line-icon { margin-right: .42em; }
     font-size:14px;
 }
 .return-select-all input,
-.return-process-option input,
 .return-row-checkbox{
     width:17px;
     height:17px;
     accent-color:#f29a38;
-}
-.return-process-option{
-    min-height:42px;
-    display:flex;
-    align-items:center;
-    gap:8px;
-    padding:8px 12px;
-    border:1px solid #ecd9bd;
-    border-radius:9px;
-    background:#fff8ef;
-    color:#8b642d;
-    font-size:12px;
-    line-height:1.4;
 }
 .return-request-actions{
     flex-wrap:wrap;
@@ -4006,5 +3992,4 @@ summary .auto-line-icon { margin-right: .42em; }
 }
 @media(max-width:700px){
     .return-request-metrics{grid-template-columns:1fr}
-    .return-process-option{width:100%}
 }
