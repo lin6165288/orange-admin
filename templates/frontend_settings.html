@@ -14,170 +14,192 @@
 <div class="frontend-message error"><i class="bi bi-exclamation-circle"></i><span>{{ error }}</span></div>
 {% endif %}
 
-<div class="frontend-grid">
-  <section class="frontend-card">
-    <div class="frontend-card-head">
-      <div class="frontend-card-icon"><i class="bi bi-clock-history"></i></div>
-      <div>
-        <h2>訂單資料更新時間</h2>
-      </div>
-    </div>
-    <div class="frontend-current-value">
-      <span>目前前台顯示</span>
+<section class="frontend-quick-settings">
+  <div class="frontend-quick-card">
+    <div class="frontend-quick-icon"><i class="bi bi-clock-history"></i></div>
+    <div class="frontend-quick-main">
+      <span class="frontend-quick-label">資料更新時間</span>
       <strong>{{ orders_last_update_time }}</strong>
     </div>
     <form method="post" action="/frontend-settings/update-order-time">
-      <button type="submit" class="frontend-primary"><i class="bi bi-arrow-clockwise"></i><span>更新為現在時間</span></button>
+      <button type="submit" class="frontend-quick-action" title="更新為現在時間">
+        <i class="bi bi-arrow-clockwise"></i><span>更新</span>
+      </button>
     </form>
-  </section>
-
-  <section class="frontend-card">
-    <div class="frontend-card-head">
-      <div class="frontend-card-icon"><i class="bi bi-currency-exchange"></i></div>
-      <div>
-        <h2>代購匯率</h2>
-      </div>
-    </div>
-    <form method="post" action="/frontend-settings/exchange-rate" class="frontend-rate-form">
-      <label>
-        <span>目前代購匯率</span>
-        <input type="number" name="exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(current_rate) }}" required>
-      </label>
-      <button type="submit" class="frontend-primary"><i class="bi bi-floppy"></i><span>儲存代購匯率</span></button>
-    </form>
-  </section>
-
-  <section class="frontend-card">
-    <div class="frontend-card-head">
-      <div class="frontend-card-icon"><i class="bi bi-currency-yen"></i></div>
-      <div>
-        <h2>代付匯率</h2>
-      </div>
-    </div>
-    <form method="post" action="/frontend-settings/payment-exchange-rate" class="frontend-rate-form">
-      <label>
-        <span>目前代付匯率</span>
-        <input type="number" name="payment_exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(payment_rate) }}" required>
-      </label>
-      <button type="submit" class="frontend-primary"><i class="bi bi-floppy"></i><span>儲存代付匯率</span></button>
-    </form>
-  </section>
-</div>
-
-
-<section class="frontend-card frontend-content-section">
-  <div class="frontend-section-head">
-    <div>
-      <h2><span class="section-title-icon"><i class="bi bi-megaphone"></i></span>前台內容管理</h2>
-    </div>
   </div>
 
-  <form method="post" action="/frontend-settings/contents/add" class="frontend-content-add">
-    <div class="frontend-field">
-      <label>類型</label>
-      <select name="content_type">
-        <option value="announcement">重要公告</option>
-        <option value="promotion">優惠活動</option>
-        <option value="faq">FAQ</option>
-        <option value="terms">交易須知</option>
-      </select>
-    </div>
-
-    <div class="frontend-field">
-      <label>標籤</label>
-      <input type="text" name="tag_label" maxlength="50" placeholder="例如：NOTICE">
-    </div>
-
-    <div class="frontend-field frontend-content-title-field">
-      <label>標題</label>
-      <input type="text" name="title" maxlength="255" required>
-    </div>
-
-    <div class="frontend-field frontend-sort-field">
-      <label>排序</label>
-      <input type="number" name="sort_order" min="0" max="9999" value="0" step="1">
-    </div>
-
-    <div class="frontend-field frontend-content-desc-field">
-      <label>內容</label>
-      <textarea name="description" maxlength="2000" rows="3"></textarea>
-    </div>
-
-    <div class="frontend-content-add-action">
-      <button type="submit" class="frontend-primary">
-        <i class="bi bi-plus-lg"></i><span>新增內容</span>
+  <div class="frontend-quick-card">
+    <div class="frontend-quick-icon"><i class="bi bi-currency-exchange"></i></div>
+    <form method="post" action="/frontend-settings/exchange-rate" class="frontend-quick-rate-form">
+      <label>
+        <span class="frontend-quick-label">代購匯率</span>
+        <input type="number" name="exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(current_rate) }}" required>
+      </label>
+      <button type="submit" class="frontend-quick-action" title="儲存代購匯率">
+        <i class="bi bi-floppy"></i><span>儲存</span>
       </button>
+    </form>
+  </div>
+
+  <div class="frontend-quick-card">
+    <div class="frontend-quick-icon"><i class="bi bi-currency-yen"></i></div>
+    <form method="post" action="/frontend-settings/payment-exchange-rate" class="frontend-quick-rate-form">
+      <label>
+        <span class="frontend-quick-label">代付匯率</span>
+        <input type="number" name="payment_exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(payment_rate) }}" required>
+      </label>
+      <button type="submit" class="frontend-quick-action" title="儲存代付匯率">
+        <i class="bi bi-floppy"></i><span>儲存</span>
+      </button>
+    </form>
+  </div>
+</section>
+
+<section class="frontend-card frontend-content-section">
+  <div class="frontend-section-head frontend-content-head">
+    <div>
+      <h2><span class="section-title-icon"><i class="bi bi-megaphone"></i></span>前台內容管理</h2>
+      <p>首頁公告、優惠活動、FAQ 與交易須知。</p>
     </div>
-  </form>
+
+    <details class="frontend-content-create">
+      <summary class="frontend-primary frontend-content-create-button">
+        <i class="bi bi-plus-lg"></i><span>新增內容</span>
+      </summary>
+
+      <div class="frontend-editor-panel">
+        <div class="frontend-editor-title">新增前台內容</div>
+        <form method="post" action="/frontend-settings/contents/add" class="frontend-content-editor-form">
+          <div class="frontend-field">
+            <label>類型</label>
+            <select name="content_type">
+              <option value="announcement">重要公告</option>
+              <option value="promotion">優惠活動</option>
+              <option value="faq">FAQ</option>
+              <option value="terms">交易須知</option>
+            </select>
+          </div>
+
+          <div class="frontend-field">
+            <label>標籤</label>
+            <input type="text" name="tag_label" maxlength="50" placeholder="NOTICE">
+          </div>
+
+          <div class="frontend-field frontend-content-title-field">
+            <label>標題</label>
+            <input type="text" name="title" maxlength="255" required>
+          </div>
+
+          <div class="frontend-field frontend-sort-field">
+            <label>排序</label>
+            <input type="number" name="sort_order" min="0" max="9999" value="0" step="1">
+          </div>
+
+          <div class="frontend-field frontend-content-desc-field">
+            <label>內容</label>
+            <textarea name="description" maxlength="2000" rows="4"></textarea>
+          </div>
+
+          <div class="frontend-editor-actions">
+            <button type="submit" class="frontend-primary">
+              <i class="bi bi-plus-lg"></i><span>新增</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </details>
+  </div>
 
   {% if contents %}
-  <div class="frontend-content-list">
+  <div class="frontend-content-list frontend-content-list-clean">
     {% for item in contents %}
-    <article class="frontend-content-item {% if not item.is_active_bool %}inactive{% endif %}">
-      <div class="frontend-batch-meta">
-        <span class="frontend-batch-id">#{{ item.content_id }}</span>
-        <span class="frontend-batch-type">{{ item.type_label }}</span>
-        {% if item.is_active_bool %}
-          <span class="frontend-status active">顯示中</span>
-        {% else %}
-          <span class="frontend-status hidden">已隱藏</span>
-        {% endif %}
-        <span class="frontend-batch-updated">更新：{{ item.updated_at }}</span>
+    <article class="frontend-content-row {% if not item.is_active_bool %}inactive{% endif %}">
+      <div class="frontend-content-summary">
+        <div class="frontend-content-summary-main">
+          <div class="frontend-content-summary-meta">
+            <span class="frontend-batch-type">{{ item.type_label }}</span>
+            {% if item.is_active_bool %}
+              <span class="frontend-status active">顯示中</span>
+            {% else %}
+              <span class="frontend-status hidden">已隱藏</span>
+            {% endif %}
+            {% if item.tag_label %}<span class="frontend-content-tag">{{ item.tag_label }}</span>{% endif %}
+          </div>
+          <h3>{{ item.title }}</h3>
+          {% if item.description %}
+          <p>{{ item.description }}</p>
+          {% else %}
+          <p class="frontend-content-empty-copy">尚未填寫內容</p>
+          {% endif %}
+        </div>
+
+        <div class="frontend-content-side">
+          <span class="frontend-content-updated">排序 {{ item.sort_order }} · {{ item.updated_at }}</span>
+          <details class="frontend-content-edit-toggle">
+            <summary class="frontend-edit-trigger"><i class="bi bi-pencil"></i><span>編輯</span></summary>
+
+            <div class="frontend-editor-panel frontend-editor-panel-edit">
+              <div class="frontend-editor-title">編輯 #{{ item.content_id }}</div>
+
+              <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/save" class="frontend-content-editor-form">
+                <div class="frontend-field">
+                  <label>類型</label>
+                  <select name="content_type">
+                    <option value="announcement" {% if item.content_type == 'announcement' %}selected{% endif %}>重要公告</option>
+                    <option value="promotion" {% if item.content_type == 'promotion' %}selected{% endif %}>優惠活動</option>
+                    <option value="faq" {% if item.content_type == 'faq' %}selected{% endif %}>FAQ</option>
+                    <option value="terms" {% if item.content_type == 'terms' %}selected{% endif %}>交易須知</option>
+                  </select>
+                </div>
+
+                <div class="frontend-field">
+                  <label>標籤</label>
+                  <input type="text" name="tag_label" maxlength="50" value="{{ item.tag_label or '' }}">
+                </div>
+
+                <div class="frontend-field frontend-content-title-field">
+                  <label>標題</label>
+                  <input type="text" name="title" maxlength="255" value="{{ item.title }}" required>
+                </div>
+
+                <div class="frontend-field frontend-sort-field">
+                  <label>排序</label>
+                  <input type="number" name="sort_order" min="0" max="9999" value="{{ item.sort_order }}" step="1">
+                </div>
+
+                <div class="frontend-field frontend-content-desc-field">
+                  <label>內容</label>
+                  <textarea name="description" maxlength="2000" rows="4">{{ item.description or '' }}</textarea>
+                </div>
+
+                <label class="frontend-active-check">
+                  <input type="checkbox" name="is_active" value="1" {% if item.is_active_bool %}checked{% endif %}>
+                  <span>前台顯示</span>
+                </label>
+
+                <div class="frontend-editor-actions">
+                  <button type="submit" class="frontend-save-btn">
+                    <i class="bi bi-floppy"></i><span>儲存變更</span>
+                  </button>
+                </div>
+              </form>
+
+              <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/delete"
+                    class="frontend-delete-form frontend-editor-delete"
+                    onsubmit="return confirm('確定要刪除前台內容 #{{ item.content_id }} 嗎？')">
+                <button type="submit" class="frontend-delete-btn">
+                  <i class="bi bi-trash3"></i><span>刪除</span>
+                </button>
+              </form>
+            </div>
+          </details>
+        </div>
       </div>
-
-      <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/save" class="frontend-content-edit">
-        <div class="frontend-field">
-          <label>類型</label>
-          <select name="content_type">
-            <option value="announcement" {% if item.content_type == 'announcement' %}selected{% endif %}>重要公告</option>
-            <option value="promotion" {% if item.content_type == 'promotion' %}selected{% endif %}>優惠活動</option>
-            <option value="faq" {% if item.content_type == 'faq' %}selected{% endif %}>FAQ</option>
-            <option value="terms" {% if item.content_type == 'terms' %}selected{% endif %}>交易須知</option>
-          </select>
-        </div>
-
-        <div class="frontend-field">
-          <label>標籤</label>
-          <input type="text" name="tag_label" maxlength="50" value="{{ item.tag_label or '' }}">
-        </div>
-
-        <div class="frontend-field frontend-content-title-field">
-          <label>標題</label>
-          <input type="text" name="title" maxlength="255" value="{{ item.title }}" required>
-        </div>
-
-        <div class="frontend-field frontend-sort-field">
-          <label>排序</label>
-          <input type="number" name="sort_order" min="0" max="9999" value="{{ item.sort_order }}" step="1">
-        </div>
-
-        <div class="frontend-field frontend-content-desc-field">
-          <label>內容</label>
-          <textarea name="description" maxlength="2000" rows="3">{{ item.description or '' }}</textarea>
-        </div>
-
-        <label class="frontend-active-check">
-          <input type="checkbox" name="is_active" value="1" {% if item.is_active_bool %}checked{% endif %}>
-          <span>前台顯示</span>
-        </label>
-
-        <button type="submit" class="frontend-save-btn">
-          <i class="bi bi-floppy"></i><span>儲存</span>
-        </button>
-      </form>
-
-      <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/delete"
-            class="frontend-delete-form"
-            onsubmit="return confirm('確定要刪除前台內容 #{{ item.content_id }} 嗎？')">
-        <button type="submit" class="frontend-delete-btn">
-          <i class="bi bi-trash3"></i><span>刪除</span>
-        </button>
-      </form>
     </article>
     {% endfor %}
   </div>
   {% else %}
-  <div class="empty-state">目前沒有公告或優惠活動。</div>
+  <div class="empty-state">目前沒有前台內容。</div>
   {% endif %}
 </section>
 
