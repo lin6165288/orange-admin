@@ -7517,3 +7517,293 @@ def feedbacks_apply(
         keyword_filter,
         message=f"已將 {changed} 筆回饋更新為「{new_status}」。",
     )
+
+
+# =========================================================
+# 系統問題回報管理
+# =========================================================
+
+ISSUE_REPORT_STATUSES = ("待處理", "處理中", "已完成", "忽略")
+
+
+def ensure_issue_report_table():
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_issue_reports (
+                    report_id INT AUTO_INCREMENT PRIMARY KEY,
+                    issue_type VARCHAR(50) NOT NULL,
+                    page_name VARCHAR(100) NOT NULL,
+                    description TEXT NOT NULL,
+                    customer_name VARCHAR(255) NULL,
+                    line_user_id VARCHAR(255) NULL,
+                    frontend_version VARCHAR(50) NULL,
+                    page_path VARCHAR(255) NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT '待處理',
+                    staff_note TEXT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                      ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_issue_status (status),
+                    INDEX idx_issue_created_at (created_at),
+                    INDEX idx_issue_customer (customer_name)
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def issue_report_rows(keyword="", status="all"):
+    ensure_issue_report_table()
+
+    keyword = str(keyword or "").strip()[:120]
+    status = str(status or "all").strip()
+
+    if status not in ("all",) + ISSUE_REPORT_STATUSES:
+        status = "all"
+
+    where = ["1=1"]
+    params = []
+
+    if status != "all":
+        where.append("status = %s")
+        params.append(status)
+
+    if keyword:
+        like = f"%{keyword}%"
+        where.append(
+            """
+            (
+                issue_type LIKE %s
+                OR page_name LIKE %s
+                OR description LIKE %s
+                OR COALESCE(customer_name,'') LIKE %s
+                OR COALESCE(line_user_id,'') LIKE %s
+                OR COALESCE(staff_note,'') LIKE %s
+            )
+            """
+        )
+        params.extend([like] * 6)
+
+    conn = get_db()
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    report_id,
+                    issue_type,
+                    page_name,
+                    description,
+                    customer_name,
+                    line_user_id,
+                    frontend_version,
+                    page_path,
+                    status,
+                    staff_note,
+                    created_at,
+                    updated_at
+                FROM system_issue_reports
+                WHERE {' AND '.join(where)}
+                ORDER BY created_at DESC, report_id DESC
+                LIMIT 500
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT status, COUNT(*) AS cnt
+                FROM system_issue_reports
+                GROUP BY status
+                """
+            )
+            counts = {
+                row["status"]: int(row["cnt"] or 0)
+                for row in cursor.fetchall()
+            }
+    finally:
+        conn.close()
+
+    for row in rows:
+        if row.get("status") not in ISSUE_REPORT_STATUSES:
+            row["status"] = "待處理"
+
+        row["created_at_tw"] = return_request_time_taipei(
+            row.get("created_at")
+        )
+        row["updated_at_tw"] = return_request_time_taipei(
+            row.get("updated_at")
+        )
+
+    return rows, counts, keyword, status
+
+
+def _issue_report_redirect(
+    status_filter="all",
+    keyword="",
+    message="",
+    error="",
+):
+    parts = [
+        "status=" + quote(str(status_filter or "all"))
+    ]
+
+    if keyword:
+        parts.append("keyword=" + quote(str(keyword)))
+
+    if message:
+        parts.append("message=" + quote(str(message)))
+
+    if error:
+        parts.append("error=" + quote(str(error)))
+
+    return RedirectResponse(
+        url="/issue-reports?" + "&".join(parts),
+        status_code=303,
+    )
+
+
+@app.get("/issue-reports")
+def issue_reports_page(
+    request: Request,
+    keyword: str = "",
+    status: str = "all",
+    message: str = "",
+    error: str = "",
+    admin: str = Depends(verify_admin),
+):
+    rows, counts, keyword, status = issue_report_rows(
+        keyword,
+        status,
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="issue_reports.html",
+        context={
+            "rows": rows,
+            "counts": counts,
+            "keyword": keyword,
+            "status": status,
+            "message": str(message or ""),
+            "error": str(error or ""),
+            "issue_statuses": ISSUE_REPORT_STATUSES,
+        },
+    )
+
+
+@app.post("/issue-reports/apply")
+async def issue_reports_apply(
+    request: Request,
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+
+    form = await request.form()
+
+    raw_ids = form.getlist("selected_report_ids")
+    new_status = str(form.get("new_status") or "").strip()
+    staff_note = str(form.get("staff_note") or "").strip()
+    status_filter = str(
+        form.get("status_filter") or "all"
+    ).strip()
+    keyword_filter = str(
+        form.get("keyword_filter") or ""
+    ).strip()
+
+    ids = []
+    seen = set()
+
+    for raw in raw_ids:
+        try:
+            report_id = int(raw)
+        except (TypeError, ValueError):
+            continue
+
+        if report_id > 0 and report_id not in seen:
+            seen.add(report_id)
+            ids.append(report_id)
+
+    if not ids:
+        return _issue_report_redirect(
+            status_filter,
+            keyword_filter,
+            error="請先勾選至少一筆問題回報。",
+        )
+
+    if len(ids) > 100:
+        return _issue_report_redirect(
+            status_filter,
+            keyword_filter,
+            error="一次最多處理 100 筆問題回報。",
+        )
+
+    if new_status not in ISSUE_REPORT_STATUSES:
+        return _issue_report_redirect(
+            status_filter,
+            keyword_filter,
+            error="請選擇正確的處理狀態。",
+        )
+
+    if len(staff_note) > 65535:
+        return _issue_report_redirect(
+            status_filter,
+            keyword_filter,
+            error="處理備註過長。",
+        )
+
+    ensure_issue_report_table()
+
+    placeholders = ",".join(["%s"] * len(ids))
+    conn = get_db()
+
+    try:
+        with conn.cursor() as cursor:
+            if staff_note:
+                cursor.execute(
+                    f"""
+                    UPDATE system_issue_reports
+                    SET status=%s, staff_note=%s
+                    WHERE report_id IN ({placeholders})
+                    """,
+                    [new_status, staff_note] + ids,
+                )
+            else:
+                cursor.execute(
+                    f"""
+                    UPDATE system_issue_reports
+                    SET status=%s
+                    WHERE report_id IN ({placeholders})
+                    """,
+                    [new_status] + ids,
+                )
+
+            changed = int(cursor.rowcount or 0)
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+
+    return _issue_report_redirect(
+        status_filter,
+        keyword_filter,
+        message=(
+            f"已將 {changed} 筆問題回報更新為"
+            f"「{new_status}」。"
+        ),
+    )
