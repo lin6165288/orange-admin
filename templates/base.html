@@ -71,6 +71,11 @@
                     <span class="menu-label">匿名回饋</span>
                 </a>
 
+                <a class="menu-item {% if request.url.path.startswith('/issue-reports') %}active{% endif %}" href="/issue-reports" title="問題回報">
+                    <span class="menu-icon"><i class="bi bi-tools"></i></span>
+                    <span class="menu-label">問題回報</span>
+                </a>
+
                 <a class="menu-item {% if request.url.path.startswith('/frontend-settings') %}active{% endif %}" href="/frontend-settings" title="前台設定">
                     <span class="menu-icon"><i class="bi bi-megaphone"></i></span>
                     <span class="menu-label">前台設定</span>
