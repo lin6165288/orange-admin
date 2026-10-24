@@ -3743,26 +3743,47 @@ def shipping_request_detail(
 
 
 @app.post("/shipping/requests/apply")
-def shipping_requests_apply(
+async def shipping_requests_apply(
     request: Request,
-    selected_request_ids: list[int] = Form([]),
-    action: str = Form(""),
-    status_filter: str = Form("pending"),
-    customer_filter: str = Form(""),
-    mark_early_return: Optional[str] = Form(None),
     admin: str = Depends(verify_admin),
 ):
     _check_same_origin(request)
+
+    form = await request.form()
+
+    action = str(form.get("action") or "").strip()
+    status_filter = str(form.get("status_filter") or "pending").strip()
+    customer_filter = str(form.get("customer_filter") or "").strip()
+
     if action not in ("processed", "cancelled"):
         raise HTTPException(status_code=422, detail="申請操作不正確")
-    ids = [int(x) for x in selected_request_ids]
+
+    raw_ids = form.getlist("selected_request_ids")
+    ids = []
+
+    for value in raw_ids:
+        try:
+            request_id = int(value)
+        except (TypeError, ValueError):
+            continue
+
+        if request_id > 0:
+            ids.append(request_id)
+
     if len(ids) != len(set(ids)) or not 1 <= len(ids) <= 100:
-        raise HTTPException(status_code=422, detail="每次請選擇 1～100 筆不重複申請")
+        raise HTTPException(
+            status_code=422,
+            detail="每次請選擇 1～100 筆不重複申請",
+        )
+
     ensure_return_request_tables()
+
     conn = get_db()
+
     try:
         with conn.cursor() as cursor:
             placeholders = ",".join(["%s"] * len(ids))
+
             cursor.execute(
                 f"""
                 SELECT request_id, status
@@ -3773,21 +3794,41 @@ def shipping_requests_apply(
                 ids,
             )
             current = cursor.fetchall()
+
             if len(current) != len(ids):
-                raise HTTPException(status_code=409, detail="部分申請已不存在，請重新整理")
-            non_pending = [row["request_id"] for row in current if row.get("status") != "pending"]
+                raise HTTPException(
+                    status_code=409,
+                    detail="部分申請已不存在，請重新整理",
+                )
+
+            non_pending = [
+                row["request_id"]
+                for row in current
+                if row.get("status") != "pending"
+            ]
+
             if non_pending:
-                raise HTTPException(status_code=409, detail="部分申請已被處理，請重新整理後再操作")
+                raise HTTPException(
+                    status_code=409,
+                    detail="部分申請已被處理，請重新整理後再操作",
+                )
+
             cursor.execute(
-                f"UPDATE customer_return_requests SET status = %s "
-                f"WHERE request_id IN ({placeholders}) AND status = 'pending'",
+                f"""
+                UPDATE customer_return_requests
+                SET status = %s
+                WHERE request_id IN ({placeholders})
+                  AND status = 'pending'
+                """,
                 [action] + ids,
             )
             changed = cursor.rowcount
 
             early_return_count = 0
 
-            if action == "processed" and mark_early_return == "1":
+            # 「已處理」就是代表客戶的提前運回申請已接受，
+            # 因此不再需要另外勾選，直接同步標記申請內訂單。
+            if action == "processed":
                 cursor.execute(
                     f"""
                     SELECT DISTINCT order_id
@@ -3796,7 +3837,9 @@ def shipping_requests_apply(
                     """,
                     ids,
                 )
+
                 item_rows = cursor.fetchall()
+
                 order_ids = [
                     int(row["order_id"])
                     for row in item_rows
@@ -3804,7 +3847,10 @@ def shipping_requests_apply(
                 ]
 
                 if order_ids:
-                    order_placeholders = ",".join(["%s"] * len(order_ids))
+                    order_placeholders = ",".join(
+                        ["%s"] * len(order_ids)
+                    )
+
                     cursor.execute(
                         f"""
                         UPDATE orders
@@ -3813,27 +3859,43 @@ def shipping_requests_apply(
                         """,
                         order_ids,
                     )
+
                     early_return_count = cursor.rowcount
+
         conn.commit()
+
     except Exception:
         conn.rollback()
         raise
+
     finally:
         conn.close()
+
     label = RETURN_REQUEST_STATUS_LABELS[action]
-    # 回到待處理頁，避免使用者誤以為已處理的申請仍在待辦。
-    target_status = "pending" if status_filter in ("pending", "all") else status_filter
-    customer_filter = str(customer_filter or "").strip()
+
+    target_status = (
+        "pending"
+        if status_filter in ("pending", "all")
+        else status_filter
+    )
+
     result_message = f"已將 {changed} 筆申請標記為{label}。"
-    if action == "processed" and mark_early_return == "1":
-        result_message += f" 同步將 {early_return_count} 筆訂單標記為提前運回。"
+
+    if action == "processed":
+        result_message += (
+            f" 同步將 {early_return_count} 筆訂單標記為提前運回。"
+        )
 
     qs = (
         f"status={quote(target_status)}"
         f"&customer={quote(customer_filter)}"
         f"&message={quote(result_message)}"
     )
-    return RedirectResponse(url=f"/shipping/requests?{qs}", status_code=303)
+
+    return RedirectResponse(
+        url=f"/shipping/requests?{qs}",
+        status_code=303,
+    )
 
 
 # =========================================================
