@@ -6571,10 +6571,9 @@ def frontend_settings_context(message="", error=""):
             {
                 **row,
                 "is_active_bool": bool(row.get("is_active")),
-                "type_label": (
-                    "重要公告"
-                    if row.get("content_type") == "announcement"
-                    else "優惠活動"
+                "type_label": FRONTEND_CONTENT_TYPES.get(
+                    row.get("content_type"),
+                    row.get("content_type") or "—",
                 ),
             }
             for row in contents
@@ -6712,6 +6711,8 @@ def frontend_save_payment_exchange_rate(
 FRONTEND_CONTENT_TYPES = {
     "announcement": "重要公告",
     "promotion": "優惠活動",
+    "faq": "FAQ",
+    "terms": "交易須知",
 }
 
 
