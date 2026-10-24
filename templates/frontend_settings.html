@@ -1,76 +1,378 @@
 {% extends "base.html" %}
 {% block title %}前台設定｜橘貓代購{% endblock %}
 {% block content %}
-<div class="page-header frontend-page-head">
-  <div>
-    <h1><span class="page-title-icon"><i class="bi bi-megaphone"></i></span>前台設定</h1>
+
+<style>
+/* v3.15 - scoped to this page so it does not depend on static cache */
+#frontendSettingsV315{
+  --fs-orange:#f29a38;
+  --fs-orange-deep:#d97812;
+  --fs-orange-soft:#fff6ea;
+  --fs-text:#222;
+  --fs-muted:#8b8b8b;
+  --fs-line:#ececec;
+  --fs-card:#fff;
+}
+#frontendSettingsV315 *{box-sizing:border-box}
+#frontendSettingsV315 .fs-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+#frontendSettingsV315 .fs-head h1{margin:0;font-size:27px;display:flex;align-items:center;gap:10px}
+#frontendSettingsV315 .fs-title-icon,
+#frontendSettingsV315 .fs-section-icon{
+  width:36px;height:36px;border-radius:11px;
+  background:var(--fs-orange-soft);
+  border:1px solid #f1dcc0;
+  color:var(--fs-orange-deep);
+  display:grid;place-items:center;
+}
+#frontendSettingsV315 .fs-alert{
+  margin-bottom:12px;padding:11px 14px;border-radius:11px;
+  display:flex;align-items:center;gap:8px;font-size:13px
+}
+#frontendSettingsV315 .fs-alert.success{background:#eefaf1;color:#477b55}
+#frontendSettingsV315 .fs-alert.error{background:#fff1f1;color:#a94b4b}
+
+/* compact top settings */
+#frontendSettingsV315 .fs-quick-grid{
+  display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:10px;margin-bottom:14px
+}
+#frontendSettingsV315 .fs-quick-card{
+  background:#fff;border:1px solid var(--fs-line);border-radius:14px;
+  min-height:76px;padding:12px 13px;display:flex;align-items:center;gap:11px
+}
+#frontendSettingsV315 .fs-quick-icon{
+  width:38px;height:38px;flex:0 0 38px;border-radius:11px;
+  display:grid;place-items:center;background:var(--fs-orange-soft);
+  color:var(--fs-orange-deep);border:1px solid #f2dec3;font-size:17px
+}
+#frontendSettingsV315 .fs-quick-body{min-width:0;flex:1}
+#frontendSettingsV315 .fs-kicker{display:block;font-size:11px;color:#999;margin-bottom:4px}
+#frontendSettingsV315 .fs-value{font-size:15px;font-weight:800;color:#242424;white-space:nowrap}
+#frontendSettingsV315 .fs-inline-form{display:flex;align-items:flex-end;gap:7px;flex:1;min-width:0}
+#frontendSettingsV315 .fs-inline-form label{display:block;flex:1;min-width:0}
+#frontendSettingsV315 .fs-inline-form input{
+  width:100%;height:34px;border:1px solid #dedede;border-radius:8px;
+  padding:0 9px;font:inherit;font-size:13px;background:#fff;outline:none
+}
+#frontendSettingsV315 .fs-inline-form input:focus{border-color:var(--fs-orange)}
+#frontendSettingsV315 .fs-mini-btn{
+  height:34px;padding:0 11px;border:1px solid #efcfaa;border-radius:8px;
+  background:#fff8ef;color:#aa650e;font:inherit;font-size:12px;font-weight:750;
+  cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap
+}
+
+/* main content card */
+#frontendSettingsV315 .fs-panel{
+  background:#fff;border:1px solid var(--fs-line);border-radius:16px;
+  padding:17px;margin-bottom:14px
+}
+#frontendSettingsV315 .fs-panel-head{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px
+}
+#frontendSettingsV315 .fs-panel-title{display:flex;align-items:center;gap:10px}
+#frontendSettingsV315 .fs-panel-title h2{margin:0;font-size:18px}
+#frontendSettingsV315 .fs-panel-title p{margin:4px 0 0;color:#999;font-size:11px}
+#frontendSettingsV315 .fs-primary-btn{
+  height:38px;padding:0 14px;border:1px solid var(--fs-orange-deep);border-radius:10px;
+  background:var(--fs-orange);color:#fff;font:inherit;font-size:12px;font-weight:800;
+  cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap
+}
+
+/* filter tabs - FAQ always visible */
+#frontendSettingsV315 .fs-tabs{
+  display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+  padding:10px;background:#fafafa;border:1px solid #f0f0f0;border-radius:12px;margin-bottom:11px
+}
+#frontendSettingsV315 .fs-tab{
+  border:1px solid #e6e6e6;background:#fff;color:#666;border-radius:999px;
+  min-height:32px;padding:0 11px;font:inherit;font-size:11px;font-weight:700;cursor:pointer
+}
+#frontendSettingsV315 .fs-tab.active{
+  background:#fff4e6;border-color:#efc999;color:#bd6d10
+}
+#frontendSettingsV315 .fs-count{
+  display:inline-grid;place-items:center;min-width:19px;height:19px;padding:0 5px;
+  border-radius:999px;background:#f4f4f4;color:#888;margin-left:4px;font-size:10px
+}
+#frontendSettingsV315 .fs-tab.active .fs-count{background:#f6dfc1;color:#a9610d}
+
+/* content list */
+#frontendSettingsV315 .fs-content-list{display:grid;gap:8px}
+#frontendSettingsV315 .fs-content-row{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;
+  border:1px solid #ededed;border-radius:12px;padding:12px 13px;background:#fff
+}
+#frontendSettingsV315 .fs-content-row.is-inactive{background:#fbfbfb;opacity:.78}
+#frontendSettingsV315 .fs-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+#frontendSettingsV315 .fs-chip{
+  display:inline-flex;align-items:center;height:22px;padding:0 7px;border-radius:999px;
+  background:#f5f5f5;color:#777;font-size:10px;font-weight:750
+}
+#frontendSettingsV315 .fs-chip.type{background:#fff3e4;color:#b76609}
+#frontendSettingsV315 .fs-chip.on{background:#eaf7ee;color:#4d8059}
+#frontendSettingsV315 .fs-chip.off{background:#f2f2f2;color:#999}
+#frontendSettingsV315 .fs-chip.tag{background:#fffaf2;border:1px solid #f2dfc7}
+#frontendSettingsV315 .fs-content-row h3{margin:0;font-size:14px;line-height:1.45}
+#frontendSettingsV315 .fs-content-row p{
+  margin:4px 0 0;color:#8c8c8c;font-size:11px;line-height:1.5;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-line
+}
+#frontendSettingsV315 .fs-row-side{display:flex;align-items:center;gap:9px}
+#frontendSettingsV315 .fs-updated{color:#aaa;font-size:10px;white-space:nowrap}
+#frontendSettingsV315 .fs-edit-btn{
+  height:32px;padding:0 10px;border:1px solid #ead3b5;border-radius:8px;
+  background:#fffaf3;color:#a96615;font:inherit;font-size:11px;font-weight:750;cursor:pointer
+}
+#frontendSettingsV315 .fs-filter-empty{
+  display:none;padding:24px;text-align:center;color:#aaa;font-size:12px;
+  border:1px dashed #dedede;border-radius:12px;background:#fcfcfc
+}
+
+/* modal */
+#frontendSettingsV315 dialog.fs-dialog{
+  width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 44px);
+  border:0;border-radius:17px;padding:0;background:#fff;
+  box-shadow:0 24px 70px rgba(0,0,0,.2);overflow:auto
+}
+#frontendSettingsV315 dialog.fs-dialog::backdrop{background:rgba(28,28,28,.35);backdrop-filter:blur(2px)}
+#frontendSettingsV315 .fs-dialog-head{
+  position:sticky;top:0;z-index:2;background:#fff;border-bottom:1px solid #eee;
+  padding:15px 17px;display:flex;align-items:center;justify-content:space-between;gap:12px
+}
+#frontendSettingsV315 .fs-dialog-head strong{font-size:16px}
+#frontendSettingsV315 .fs-close{
+  width:32px;height:32px;border:0;border-radius:9px;background:#f5f5f5;
+  color:#666;font-size:20px;cursor:pointer
+}
+#frontendSettingsV315 .fs-dialog-body{padding:16px 17px 18px}
+#frontendSettingsV315 .fs-form-grid{
+  display:grid;grid-template-columns:150px 150px minmax(220px,1fr) 90px;gap:10px
+}
+#frontendSettingsV315 .fs-field{display:block}
+#frontendSettingsV315 .fs-field label,
+#frontendSettingsV315 .fs-label{display:block;color:#777;font-size:11px;margin-bottom:5px}
+#frontendSettingsV315 .fs-field input,
+#frontendSettingsV315 .fs-field select,
+#frontendSettingsV315 .fs-field textarea{
+  width:100%;border:1px solid #ddd;border-radius:9px;background:#fff;
+  padding:0 10px;font:inherit;font-size:13px;outline:none
+}
+#frontendSettingsV315 .fs-field input,
+#frontendSettingsV315 .fs-field select{height:38px}
+#frontendSettingsV315 .fs-field textarea{min-height:120px;padding:10px;resize:vertical}
+#frontendSettingsV315 .fs-field input:focus,
+#frontendSettingsV315 .fs-field select:focus,
+#frontendSettingsV315 .fs-field textarea:focus{border-color:var(--fs-orange)}
+#frontendSettingsV315 .fs-field-title{grid-column:3/4}
+#frontendSettingsV315 .fs-field-content{grid-column:1/-1}
+#frontendSettingsV315 .fs-active-check{
+  display:flex;align-items:center;gap:7px;color:#555;font-size:12px;margin-top:13px
+}
+#frontendSettingsV315 .fs-dialog-actions{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin-top:16px;padding-top:14px;border-top:1px solid #f0f0f0
+}
+#frontendSettingsV315 .fs-save{
+  height:38px;padding:0 14px;border:1px solid var(--fs-orange-deep);border-radius:9px;
+  background:var(--fs-orange);color:#fff;font:inherit;font-size:12px;font-weight:800;cursor:pointer
+}
+#frontendSettingsV315 .fs-delete{
+  height:36px;padding:0 11px;border:1px solid #efd0d0;border-radius:9px;
+  background:#fff7f7;color:#b75b5b;font:inherit;font-size:11px;font-weight:750;cursor:pointer
+}
+
+@media(max-width:1000px){
+  #frontendSettingsV315 .fs-quick-grid{grid-template-columns:1fr 1fr}
+  #frontendSettingsV315 .fs-quick-card:first-child{grid-column:1/-1}
+  #frontendSettingsV315 .fs-updated{display:none}
+}
+@media(max-width:720px){
+  #frontendSettingsV315 .fs-quick-grid{grid-template-columns:1fr}
+  #frontendSettingsV315 .fs-quick-card:first-child{grid-column:auto}
+  #frontendSettingsV315 .fs-panel-head{align-items:flex-start;flex-direction:column}
+  #frontendSettingsV315 .fs-content-row{grid-template-columns:1fr}
+  #frontendSettingsV315 .fs-row-side{justify-content:flex-end}
+  #frontendSettingsV315 .fs-form-grid{grid-template-columns:1fr}
+  #frontendSettingsV315 .fs-field-title,
+  #frontendSettingsV315 .fs-field-content{grid-column:auto}
+}
+</style>
+
+<div id="frontendSettingsV315">
+  <div class="fs-head">
+    <h1><span class="fs-title-icon"><i class="bi bi-megaphone"></i></span>前台設定</h1>
   </div>
-</div>
 
-{% if message %}
-<div class="frontend-message success"><i class="bi bi-check2-circle"></i><span>{{ message }}</span></div>
-{% endif %}
-{% if error %}
-<div class="frontend-message error"><i class="bi bi-exclamation-circle"></i><span>{{ error }}</span></div>
-{% endif %}
+  {% if message %}
+  <div class="fs-alert success"><i class="bi bi-check2-circle"></i><span>{{ message }}</span></div>
+  {% endif %}
+  {% if error %}
+  <div class="fs-alert error"><i class="bi bi-exclamation-circle"></i><span>{{ error }}</span></div>
+  {% endif %}
 
-<section class="frontend-quick-settings">
-  <div class="frontend-quick-card">
-    <div class="frontend-quick-icon"><i class="bi bi-clock-history"></i></div>
-    <div class="frontend-quick-main">
-      <span class="frontend-quick-label">資料更新時間</span>
-      <strong>{{ orders_last_update_time }}</strong>
+  <section class="fs-quick-grid">
+    <div class="fs-quick-card">
+      <div class="fs-quick-icon"><i class="bi bi-clock-history"></i></div>
+      <div class="fs-quick-body">
+        <span class="fs-kicker">訂單資料更新時間</span>
+        <span class="fs-value">{{ orders_last_update_time }}</span>
+      </div>
+      <form method="post" action="/frontend-settings/update-order-time">
+        <button type="submit" class="fs-mini-btn">
+          <i class="bi bi-arrow-clockwise"></i>更新
+        </button>
+      </form>
     </div>
-    <form method="post" action="/frontend-settings/update-order-time">
-      <button type="submit" class="frontend-quick-action" title="更新為現在時間">
-        <i class="bi bi-arrow-clockwise"></i><span>更新</span>
-      </button>
-    </form>
-  </div>
 
-  <div class="frontend-quick-card">
-    <div class="frontend-quick-icon"><i class="bi bi-currency-exchange"></i></div>
-    <form method="post" action="/frontend-settings/exchange-rate" class="frontend-quick-rate-form">
-      <label>
-        <span class="frontend-quick-label">代購匯率</span>
-        <input type="number" name="exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(current_rate) }}" required>
-      </label>
-      <button type="submit" class="frontend-quick-action" title="儲存代購匯率">
-        <i class="bi bi-floppy"></i><span>儲存</span>
-      </button>
-    </form>
-  </div>
-
-  <div class="frontend-quick-card">
-    <div class="frontend-quick-icon"><i class="bi bi-currency-yen"></i></div>
-    <form method="post" action="/frontend-settings/payment-exchange-rate" class="frontend-quick-rate-form">
-      <label>
-        <span class="frontend-quick-label">代付匯率</span>
-        <input type="number" name="payment_exchange_rate" min="0.01" max="20" step="0.01" value="{{ '%.2f'|format(payment_rate) }}" required>
-      </label>
-      <button type="submit" class="frontend-quick-action" title="儲存代付匯率">
-        <i class="bi bi-floppy"></i><span>儲存</span>
-      </button>
-    </form>
-  </div>
-</section>
-
-<section class="frontend-card frontend-content-section">
-  <div class="frontend-section-head frontend-content-head">
-    <div>
-      <h2><span class="section-title-icon"><i class="bi bi-megaphone"></i></span>前台內容管理</h2>
-      <p>首頁公告、優惠活動、FAQ 與交易須知。</p>
+    <div class="fs-quick-card">
+      <div class="fs-quick-icon"><i class="bi bi-currency-exchange"></i></div>
+      <form method="post" action="/frontend-settings/exchange-rate" class="fs-inline-form">
+        <label>
+          <span class="fs-kicker">代購匯率</span>
+          <input type="number" name="exchange_rate" min="0.01" max="20" step="0.01"
+                 value="{{ '%.2f'|format(current_rate) }}" required>
+        </label>
+        <button type="submit" class="fs-mini-btn"><i class="bi bi-floppy"></i>儲存</button>
+      </form>
     </div>
 
-    <details class="frontend-content-create">
-      <summary class="frontend-primary frontend-content-create-button">
-        <i class="bi bi-plus-lg"></i><span>新增內容</span>
-      </summary>
+    <div class="fs-quick-card">
+      <div class="fs-quick-icon"><i class="bi bi-currency-yen"></i></div>
+      <form method="post" action="/frontend-settings/payment-exchange-rate" class="fs-inline-form">
+        <label>
+          <span class="fs-kicker">代付匯率</span>
+          <input type="number" name="payment_exchange_rate" min="0.01" max="20" step="0.01"
+                 value="{{ '%.2f'|format(payment_rate) }}" required>
+        </label>
+        <button type="submit" class="fs-mini-btn"><i class="bi bi-floppy"></i>儲存</button>
+      </form>
+    </div>
+  </section>
 
-      <div class="frontend-editor-panel">
-        <div class="frontend-editor-title">新增前台內容</div>
-        <form method="post" action="/frontend-settings/contents/add" class="frontend-content-editor-form">
-          <div class="frontend-field">
+  <section class="fs-panel">
+    <div class="fs-panel-head">
+      <div class="fs-panel-title">
+        <span class="fs-section-icon"><i class="bi bi-layout-text-window-reverse"></i></span>
+        <div>
+          <h2>前台內容管理</h2>
+          <p>公告、優惠活動、FAQ 與交易須知都在這裡管理。</p>
+        </div>
+      </div>
+
+      <button type="button" class="fs-primary-btn" onclick="fsOpenDialog('fsAddContentDialog')">
+        <i class="bi bi-plus-lg"></i>新增內容
+      </button>
+    </div>
+
+    <div class="fs-tabs" id="fsContentTabs">
+      <button type="button" class="fs-tab active" data-filter="all">全部<span class="fs-count" data-count="all">0</span></button>
+      <button type="button" class="fs-tab" data-filter="announcement">重要公告<span class="fs-count" data-count="announcement">0</span></button>
+      <button type="button" class="fs-tab" data-filter="promotion">優惠活動<span class="fs-count" data-count="promotion">0</span></button>
+      <button type="button" class="fs-tab" data-filter="faq"><i class="bi bi-question-circle"></i> FAQ<span class="fs-count" data-count="faq">0</span></button>
+      <button type="button" class="fs-tab" data-filter="terms">交易須知<span class="fs-count" data-count="terms">0</span></button>
+    </div>
+
+    {% if contents %}
+    <div class="fs-content-list" id="fsContentList">
+      {% for item in contents %}
+      <article class="fs-content-row {% if not item.is_active_bool %}is-inactive{% endif %}"
+               data-content-type="{{ item.content_type }}">
+        <div>
+          <div class="fs-meta">
+            <span class="fs-chip type">{{ item.type_label }}</span>
+            {% if item.is_active_bool %}
+              <span class="fs-chip on">顯示中</span>
+            {% else %}
+              <span class="fs-chip off">已隱藏</span>
+            {% endif %}
+            {% if item.tag_label %}<span class="fs-chip tag">{{ item.tag_label }}</span>{% endif %}
+          </div>
+          <h3>{{ item.title }}</h3>
+          {% if item.description %}
+            <p>{{ item.description }}</p>
+          {% else %}
+            <p>尚未填寫內容</p>
+          {% endif %}
+        </div>
+
+        <div class="fs-row-side">
+          <span class="fs-updated">排序 {{ item.sort_order }} · {{ item.updated_at }}</span>
+          <button type="button" class="fs-edit-btn"
+                  onclick="fsOpenDialog('fsEditContent{{ item.content_id }}')">
+            <i class="bi bi-pencil"></i> 編輯
+          </button>
+        </div>
+      </article>
+
+      <dialog class="fs-dialog" id="fsEditContent{{ item.content_id }}">
+        <div class="fs-dialog-head">
+          <strong>編輯前台內容 #{{ item.content_id }}</strong>
+          <button type="button" class="fs-close" onclick="fsCloseDialog('fsEditContent{{ item.content_id }}')">×</button>
+        </div>
+        <div class="fs-dialog-body">
+          <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/save">
+            <div class="fs-form-grid">
+              <div class="fs-field">
+                <label>類型</label>
+                <select name="content_type">
+                  <option value="announcement" {% if item.content_type == 'announcement' %}selected{% endif %}>重要公告</option>
+                  <option value="promotion" {% if item.content_type == 'promotion' %}selected{% endif %}>優惠活動</option>
+                  <option value="faq" {% if item.content_type == 'faq' %}selected{% endif %}>FAQ</option>
+                  <option value="terms" {% if item.content_type == 'terms' %}selected{% endif %}>交易須知</option>
+                </select>
+              </div>
+              <div class="fs-field">
+                <label>標籤</label>
+                <input type="text" name="tag_label" maxlength="50" value="{{ item.tag_label or '' }}">
+              </div>
+              <div class="fs-field fs-field-title">
+                <label>標題</label>
+                <input type="text" name="title" maxlength="255" value="{{ item.title }}" required>
+              </div>
+              <div class="fs-field">
+                <label>排序</label>
+                <input type="number" name="sort_order" min="0" max="9999" value="{{ item.sort_order }}" step="1">
+              </div>
+              <div class="fs-field fs-field-content">
+                <label>內容</label>
+                <textarea name="description" maxlength="2000" rows="5">{{ item.description or '' }}</textarea>
+              </div>
+            </div>
+
+            <label class="fs-active-check">
+              <input type="checkbox" name="is_active" value="1" {% if item.is_active_bool %}checked{% endif %}>
+              <span>前台顯示</span>
+            </label>
+
+            <div class="fs-dialog-actions">
+              <span></span>
+              <button type="submit" class="fs-save"><i class="bi bi-floppy"></i> 儲存變更</button>
+            </div>
+          </form>
+
+          <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/delete"
+                onsubmit="return confirm('確定要刪除前台內容 #{{ item.content_id }} 嗎？');"
+                style="margin-top:-54px;width:max-content;">
+            <button type="submit" class="fs-delete"><i class="bi bi-trash3"></i> 刪除</button>
+          </form>
+        </div>
+      </dialog>
+      {% endfor %}
+    </div>
+    <div class="fs-filter-empty" id="fsFilterEmpty">這個分類目前還沒有內容。</div>
+    {% else %}
+    <div class="fs-filter-empty" style="display:block">目前沒有前台內容，按右上角「新增內容」開始建立。</div>
+    {% endif %}
+  </section>
+
+  <dialog class="fs-dialog" id="fsAddContentDialog">
+    <div class="fs-dialog-head">
+      <strong>新增前台內容</strong>
+      <button type="button" class="fs-close" onclick="fsCloseDialog('fsAddContentDialog')">×</button>
+    </div>
+    <div class="fs-dialog-body">
+      <form method="post" action="/frontend-settings/contents/add">
+        <div class="fs-form-grid">
+          <div class="fs-field">
             <label>類型</label>
             <select name="content_type">
               <option value="announcement">重要公告</option>
@@ -79,129 +381,86 @@
               <option value="terms">交易須知</option>
             </select>
           </div>
-
-          <div class="frontend-field">
+          <div class="fs-field">
             <label>標籤</label>
-            <input type="text" name="tag_label" maxlength="50" placeholder="NOTICE">
+            <input type="text" name="tag_label" maxlength="50" placeholder="可留空">
           </div>
-
-          <div class="frontend-field frontend-content-title-field">
+          <div class="fs-field fs-field-title">
             <label>標題</label>
             <input type="text" name="title" maxlength="255" required>
           </div>
-
-          <div class="frontend-field frontend-sort-field">
+          <div class="fs-field">
             <label>排序</label>
             <input type="number" name="sort_order" min="0" max="9999" value="0" step="1">
           </div>
-
-          <div class="frontend-field frontend-content-desc-field">
+          <div class="fs-field fs-field-content">
             <label>內容</label>
-            <textarea name="description" maxlength="2000" rows="4"></textarea>
+            <textarea name="description" maxlength="2000" rows="5"
+                      placeholder="FAQ：標題填問題，內容填答案；交易須知：標題填條款名稱，內容填說明。"></textarea>
           </div>
-
-          <div class="frontend-editor-actions">
-            <button type="submit" class="frontend-primary">
-              <i class="bi bi-plus-lg"></i><span>新增</span>
-            </button>
-          </div>
-        </form>
-      </div>
-    </details>
-  </div>
-
-  {% if contents %}
-  <div class="frontend-content-list frontend-content-list-clean">
-    {% for item in contents %}
-    <article class="frontend-content-row {% if not item.is_active_bool %}inactive{% endif %}">
-      <div class="frontend-content-summary">
-        <div class="frontend-content-summary-main">
-          <div class="frontend-content-summary-meta">
-            <span class="frontend-batch-type">{{ item.type_label }}</span>
-            {% if item.is_active_bool %}
-              <span class="frontend-status active">顯示中</span>
-            {% else %}
-              <span class="frontend-status hidden">已隱藏</span>
-            {% endif %}
-            {% if item.tag_label %}<span class="frontend-content-tag">{{ item.tag_label }}</span>{% endif %}
-          </div>
-          <h3>{{ item.title }}</h3>
-          {% if item.description %}
-          <p>{{ item.description }}</p>
-          {% else %}
-          <p class="frontend-content-empty-copy">尚未填寫內容</p>
-          {% endif %}
         </div>
 
-        <div class="frontend-content-side">
-          <span class="frontend-content-updated">排序 {{ item.sort_order }} · {{ item.updated_at }}</span>
-          <details class="frontend-content-edit-toggle">
-            <summary class="frontend-edit-trigger"><i class="bi bi-pencil"></i><span>編輯</span></summary>
-
-            <div class="frontend-editor-panel frontend-editor-panel-edit">
-              <div class="frontend-editor-title">編輯 #{{ item.content_id }}</div>
-
-              <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/save" class="frontend-content-editor-form">
-                <div class="frontend-field">
-                  <label>類型</label>
-                  <select name="content_type">
-                    <option value="announcement" {% if item.content_type == 'announcement' %}selected{% endif %}>重要公告</option>
-                    <option value="promotion" {% if item.content_type == 'promotion' %}selected{% endif %}>優惠活動</option>
-                    <option value="faq" {% if item.content_type == 'faq' %}selected{% endif %}>FAQ</option>
-                    <option value="terms" {% if item.content_type == 'terms' %}selected{% endif %}>交易須知</option>
-                  </select>
-                </div>
-
-                <div class="frontend-field">
-                  <label>標籤</label>
-                  <input type="text" name="tag_label" maxlength="50" value="{{ item.tag_label or '' }}">
-                </div>
-
-                <div class="frontend-field frontend-content-title-field">
-                  <label>標題</label>
-                  <input type="text" name="title" maxlength="255" value="{{ item.title }}" required>
-                </div>
-
-                <div class="frontend-field frontend-sort-field">
-                  <label>排序</label>
-                  <input type="number" name="sort_order" min="0" max="9999" value="{{ item.sort_order }}" step="1">
-                </div>
-
-                <div class="frontend-field frontend-content-desc-field">
-                  <label>內容</label>
-                  <textarea name="description" maxlength="2000" rows="4">{{ item.description or '' }}</textarea>
-                </div>
-
-                <label class="frontend-active-check">
-                  <input type="checkbox" name="is_active" value="1" {% if item.is_active_bool %}checked{% endif %}>
-                  <span>前台顯示</span>
-                </label>
-
-                <div class="frontend-editor-actions">
-                  <button type="submit" class="frontend-save-btn">
-                    <i class="bi bi-floppy"></i><span>儲存變更</span>
-                  </button>
-                </div>
-              </form>
-
-              <form method="post" action="/frontend-settings/contents/{{ item.content_id }}/delete"
-                    class="frontend-delete-form frontend-editor-delete"
-                    onsubmit="return confirm('確定要刪除前台內容 #{{ item.content_id }} 嗎？')">
-                <button type="submit" class="frontend-delete-btn">
-                  <i class="bi bi-trash3"></i><span>刪除</span>
-                </button>
-              </form>
-            </div>
-          </details>
+        <div class="fs-dialog-actions">
+          <span></span>
+          <button type="submit" class="fs-save"><i class="bi bi-plus-lg"></i> 新增</button>
         </div>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="empty-state">目前沒有前台內容。</div>
-  {% endif %}
-</section>
+      </form>
+    </div>
+  </dialog>
+
+<script>
+(function(){
+  window.fsOpenDialog = function(id){
+    const dialog = document.getElementById(id);
+    if (dialog && typeof dialog.showModal === "function") dialog.showModal();
+  };
+
+  window.fsCloseDialog = function(id){
+    const dialog = document.getElementById(id);
+    if (dialog) dialog.close();
+  };
+
+  const rows = Array.from(document.querySelectorAll("#fsContentList .fs-content-row"));
+  const tabs = Array.from(document.querySelectorAll("#fsContentTabs .fs-tab"));
+  const empty = document.getElementById("fsFilterEmpty");
+
+  const counts = {all: rows.length, announcement:0, promotion:0, faq:0, terms:0};
+  rows.forEach(row => {
+    const type = row.dataset.contentType;
+    if (Object.prototype.hasOwnProperty.call(counts, type)) counts[type]++;
+  });
+
+  document.querySelectorAll("#fsContentTabs [data-count]").forEach(el => {
+    const key = el.dataset.count;
+    el.textContent = counts[key] ?? 0;
+  });
+
+  function applyFilter(filter){
+    let visible = 0;
+    rows.forEach(row => {
+      const show = filter === "all" || row.dataset.contentType === filter;
+      row.style.display = show ? "" : "none";
+      if (show) visible++;
+    });
+    if (empty) empty.style.display = visible ? "none" : "block";
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      tabs.forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      applyFilter(tab.dataset.filter);
+    });
+  });
+
+  document.querySelectorAll("#frontendSettingsV315 dialog.fs-dialog").forEach(dialog => {
+    dialog.addEventListener("click", event => {
+      if (event.target === dialog) dialog.close();
+    });
+  });
+})();
+</script>
+
 
 <section class="frontend-card frontend-batch-section">
   <div class="frontend-section-head">
@@ -279,4 +538,6 @@
   <div class="empty-state">目前沒有任何船班設定。</div>
   {% endif %}
 </section>
+
+</div>
 {% endblock %}
