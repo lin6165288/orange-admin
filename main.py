@@ -6261,6 +6261,24 @@ def ensure_frontend_config_tables_admin():
                 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS frontend_contents (
+                    content_id INT AUTO_INCREMENT PRIMARY KEY,
+                    content_type VARCHAR(20) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT NULL,
+                    tag_label VARCHAR(50) NULL,
+                    sort_order INT NOT NULL DEFAULT 0,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        ON UPDATE CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_frontend_contents_type_active_sort
+                        (content_type, is_active, sort_order, content_id)
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+                """
+            )
 
             cursor.execute("SHOW COLUMNS FROM shipping_batches")
             existing = {row["Field"] for row in cursor.fetchall()}
@@ -6339,6 +6357,28 @@ def frontend_settings_context(message="", error=""):
                 """
             )
             batches = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT
+                    content_id,
+                    content_type,
+                    title,
+                    description,
+                    tag_label,
+                    sort_order,
+                    is_active,
+                    updated_at,
+                    created_at
+                FROM frontend_contents
+                ORDER BY
+                    content_type ASC,
+                    is_active DESC,
+                    sort_order ASC,
+                    content_id DESC
+                """
+            )
+            contents = cursor.fetchall()
     finally:
         conn.close()
 
@@ -6373,6 +6413,18 @@ def frontend_settings_context(message="", error=""):
         "payment_rate_updated_at": settings.get("payment_exchange_rate", {}).get("updated_at"),
         "batches": batches,
         "delivery_types": FRONTEND_DELIVERY_TYPES,
+        "contents": [
+            {
+                **row,
+                "is_active_bool": bool(row.get("is_active")),
+                "type_label": (
+                    "重要公告"
+                    if row.get("content_type") == "announcement"
+                    else "優惠活動"
+                ),
+            }
+            for row in contents
+        ],
         "message": str(message or ""),
         "error": str(error or ""),
     }
@@ -6500,6 +6552,209 @@ def frontend_save_payment_exchange_rate(
     finally:
         conn.close()
     return _frontend_redirect(message=f"代付匯率已更新為 {rate_text}。")
+
+
+
+FRONTEND_CONTENT_TYPES = {
+    "announcement": "重要公告",
+    "promotion": "優惠活動",
+}
+
+
+def _validate_frontend_content_fields(
+    content_type: str,
+    title: str,
+    description: str,
+    tag_label: str,
+    sort_order: int,
+):
+    content_type = str(content_type or "").strip()
+    title = str(title or "").strip()
+    description = str(description or "").strip()
+    tag_label = str(tag_label or "").strip()
+
+    if content_type not in FRONTEND_CONTENT_TYPES:
+        return None, "內容類型不正確。"
+
+    if not title:
+        return None, "請輸入標題。"
+
+    if len(title) > 255:
+        return None, "標題最多 255 個字。"
+
+    if len(description) > 2000:
+        return None, "內容最多 2000 個字。"
+
+    if len(tag_label) > 50:
+        return None, "標籤最多 50 個字。"
+
+    sort_value = max(0, min(int(sort_order or 0), 9999))
+
+    return {
+        "content_type": content_type,
+        "title": title,
+        "description": description,
+        "tag_label": tag_label,
+        "sort_order": sort_value,
+    }, ""
+
+
+@app.post("/frontend-settings/contents/add")
+def frontend_add_content(
+    request: Request,
+    content_type: str = Form("announcement"),
+    title: str = Form(""),
+    description: str = Form(""),
+    tag_label: str = Form(""),
+    sort_order: int = Form(0),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+
+    data, error = _validate_frontend_content_fields(
+        content_type,
+        title,
+        description,
+        tag_label,
+        sort_order,
+    )
+    if error:
+        return _frontend_redirect(error=error)
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO frontend_contents (
+                    content_type,
+                    title,
+                    description,
+                    tag_label,
+                    sort_order,
+                    is_active
+                )
+                VALUES (%s, %s, %s, %s, %s, 1)
+                """,
+                (
+                    data["content_type"],
+                    data["title"],
+                    data["description"] or None,
+                    data["tag_label"] or None,
+                    data["sort_order"],
+                ),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return _frontend_redirect(
+        message=f"已新增{FRONTEND_CONTENT_TYPES[data['content_type']]}。"
+    )
+
+
+@app.post("/frontend-settings/contents/{content_id}/save")
+def frontend_save_content(
+    request: Request,
+    content_id: int,
+    content_type: str = Form("announcement"),
+    title: str = Form(""),
+    description: str = Form(""),
+    tag_label: str = Form(""),
+    sort_order: int = Form(0),
+    is_active: Optional[str] = Form(None),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+
+    data, error = _validate_frontend_content_fields(
+        content_type,
+        title,
+        description,
+        tag_label,
+        sort_order,
+    )
+    if error:
+        return _frontend_redirect(error=error)
+
+    active_value = 1 if is_active == "1" else 0
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE frontend_contents
+                SET
+                    content_type = %s,
+                    title = %s,
+                    description = %s,
+                    tag_label = %s,
+                    sort_order = %s,
+                    is_active = %s
+                WHERE content_id = %s
+                """,
+                (
+                    data["content_type"],
+                    data["title"],
+                    data["description"] or None,
+                    data["tag_label"] or None,
+                    data["sort_order"],
+                    active_value,
+                    content_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                cursor.execute(
+                    "SELECT content_id FROM frontend_contents WHERE content_id = %s",
+                    (content_id,),
+                )
+                if not cursor.fetchone():
+                    conn.rollback()
+                    return _frontend_redirect(error="找不到這筆前台內容。")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return _frontend_redirect(message=f"前台內容 #{content_id} 已更新。")
+
+
+@app.post("/frontend-settings/contents/{content_id}/delete")
+def frontend_delete_content(
+    request: Request,
+    content_id: int,
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM frontend_contents WHERE content_id = %s",
+                (content_id,),
+            )
+            deleted = cursor.rowcount
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    if not deleted:
+        return _frontend_redirect(error="找不到這筆前台內容。")
+
+    return _frontend_redirect(message=f"前台內容 #{content_id} 已刪除。")
 
 
 @app.post("/frontend-settings/batches/add")
