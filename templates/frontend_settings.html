@@ -180,6 +180,14 @@
   background:#fff7f7;color:#b75b5b;font:inherit;font-size:11px;font-weight:750;cursor:pointer
 }
 
+
+#frontendSettingsV315 .fs-faq-hint{
+  margin-top:10px;padding:10px 11px;border-radius:10px;
+  background:#fff8ef;border:1px solid #f1dec6;color:#8b693d;
+  font-size:10px;line-height:1.6;display:none
+}
+#frontendSettingsV315 .fs-faq-hint.is-visible{display:block}
+
 @media(max-width:1000px){
   #frontendSettingsV315 .fs-quick-grid{grid-template-columns:1fr 1fr}
   #frontendSettingsV315 .fs-quick-card:first-child{grid-column:1/-1}
@@ -313,7 +321,7 @@
             <div class="fs-form-grid">
               <div class="fs-field">
                 <label>類型</label>
-                <select name="content_type">
+                <select name="content_type" class="fs-content-type-select">
                   <option value="announcement" {% if item.content_type == 'announcement' %}selected{% endif %}>重要公告</option>
                   <option value="promotion" {% if item.content_type == 'promotion' %}selected{% endif %}>優惠活動</option>
                   <option value="faq" {% if item.content_type == 'faq' %}selected{% endif %}>FAQ</option>
@@ -325,16 +333,17 @@
                 <input type="text" name="tag_label" maxlength="50" value="{{ item.tag_label or '' }}">
               </div>
               <div class="fs-field fs-field-title">
-                <label>標題</label>
-                <input type="text" name="title" maxlength="255" value="{{ item.title }}" required>
+                <label class="fs-title-label">標題</label>
+                <input type="text" name="title" class="fs-title-input" maxlength="255" value="{{ item.title }}" required>
               </div>
               <div class="fs-field">
                 <label>排序</label>
                 <input type="number" name="sort_order" min="0" max="9999" value="{{ item.sort_order }}" step="1">
               </div>
               <div class="fs-field fs-field-content">
-                <label>內容</label>
-                <textarea name="description" maxlength="2000" rows="5">{{ item.description or '' }}</textarea>
+                <label class="fs-content-label">內容</label>
+                <textarea name="description" class="fs-content-input" maxlength="2000" rows="5">{{ item.description or '' }}</textarea>
+                <div class="fs-faq-hint">FAQ 模式：上方「問題」會出現在前台問題清單；這裡的「答案」只有客人點選問題後才會顯示。</div>
               </div>
             </div>
 
@@ -374,7 +383,7 @@
         <div class="fs-form-grid">
           <div class="fs-field">
             <label>類型</label>
-            <select name="content_type">
+            <select name="content_type" class="fs-content-type-select">
               <option value="announcement">重要公告</option>
               <option value="promotion">優惠活動</option>
               <option value="faq">FAQ</option>
@@ -419,6 +428,44 @@
     const dialog = document.getElementById(id);
     if (dialog) dialog.close();
   };
+
+
+  function updateContentFormLabels(select){
+    const form = select.closest("form");
+    if (!form) return;
+
+    const titleLabel = form.querySelector(".fs-title-label");
+    const contentLabel = form.querySelector(".fs-content-label");
+    const titleInput = form.querySelector(".fs-title-input");
+    const contentInput = form.querySelector(".fs-content-input");
+    const faqHint = form.querySelector(".fs-faq-hint");
+    const type = select.value;
+
+    if (type === "faq") {
+      if (titleLabel) titleLabel.textContent = "問題";
+      if (contentLabel) contentLabel.textContent = "答案";
+      if (titleInput) titleInput.placeholder = "例如：代購商品多久會到貨？";
+      if (contentInput) contentInput.placeholder = "輸入客人點選問題後要看到的答案";
+      if (faqHint) faqHint.classList.add("is-visible");
+    } else if (type === "terms") {
+      if (titleLabel) titleLabel.textContent = "條款名稱";
+      if (contentLabel) contentLabel.textContent = "條款內容";
+      if (titleInput) titleInput.placeholder = "例如：付款與退款規則";
+      if (contentInput) contentInput.placeholder = "輸入交易須知內容";
+      if (faqHint) faqHint.classList.remove("is-visible");
+    } else {
+      if (titleLabel) titleLabel.textContent = "標題";
+      if (contentLabel) contentLabel.textContent = "內容";
+      if (titleInput) titleInput.placeholder = "";
+      if (contentInput) contentInput.placeholder = "請輸入內容";
+      if (faqHint) faqHint.classList.remove("is-visible");
+    }
+  }
+
+  document.querySelectorAll("#frontendSettingsV315 .fs-content-type-select").forEach(select => {
+    updateContentFormLabels(select);
+    select.addEventListener("change", () => updateContentFormLabels(select));
+  });
 
   const rows = Array.from(document.querySelectorAll("#fsContentList .fs-content-row"));
   const tabs = Array.from(document.querySelectorAll("#fsContentTabs .fs-tab"));
