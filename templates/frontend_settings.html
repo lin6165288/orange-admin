@@ -203,6 +203,34 @@
   #frontendSettingsV315 .fs-field-title,
   #frontendSettingsV315 .fs-field-content{grid-column:auto}
 }
+
+#frontendSettingsV315 .fs-terms-panel{
+  background:#fff;border:1px solid var(--fs-line);border-radius:16px;
+  padding:17px;margin-bottom:14px
+}
+#frontendSettingsV315 .fs-terms-preview{
+  border:1px solid #eee;border-radius:12px;background:#fcfcfc;
+  padding:14px 15px;color:#666;font-size:12px;line-height:1.75;
+  white-space:pre-wrap;max-height:220px;overflow:auto
+}
+#frontendSettingsV315 .fs-terms-empty{
+  color:#aaa;text-align:center;padding:24px 12px;
+  border:1px dashed #ddd;border-radius:12px;background:#fcfcfc
+}
+#frontendSettingsV315 .fs-terms-meta{
+  display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:10px
+}
+#frontendSettingsV315 .fs-terms-editor{
+  min-height:420px !important;
+  line-height:1.75 !important;
+  font-family:inherit !important
+}
+#frontendSettingsV315 .fs-terms-help{
+  margin-top:8px;padding:10px 11px;border-radius:10px;
+  background:#fff8ef;border:1px solid #f1ddc3;color:#806b50;
+  font-size:11px;line-height:1.7
+}
+
 </style>
 
 <div id="frontendSettingsV315">
@@ -262,7 +290,7 @@
         <span class="fs-section-icon"><i class="bi bi-layout-text-window-reverse"></i></span>
         <div>
           <h2>前台內容管理</h2>
-          <p>公告、優惠活動、FAQ 與交易須知都在這裡管理。</p>
+          <p>公告、優惠活動與 FAQ 在這裡管理；交易須知使用下方的整篇編輯器。</p>
         </div>
       </div>
 
@@ -276,7 +304,6 @@
       <button type="button" class="fs-tab" data-filter="announcement">重要公告<span class="fs-count" data-count="announcement">0</span></button>
       <button type="button" class="fs-tab" data-filter="promotion">優惠活動<span class="fs-count" data-count="promotion">0</span></button>
       <button type="button" class="fs-tab" data-filter="faq"><i class="bi bi-question-circle"></i> FAQ<span class="fs-count" data-count="faq">0</span></button>
-      <button type="button" class="fs-tab" data-filter="terms">交易須知<span class="fs-count" data-count="terms">0</span></button>
     </div>
 
     {% if contents %}
@@ -325,7 +352,6 @@
                   <option value="announcement" {% if item.content_type == 'announcement' %}selected{% endif %}>重要公告</option>
                   <option value="promotion" {% if item.content_type == 'promotion' %}selected{% endif %}>優惠活動</option>
                   <option value="faq" {% if item.content_type == 'faq' %}selected{% endif %}>FAQ</option>
-                  <option value="terms" {% if item.content_type == 'terms' %}selected{% endif %}>交易須知</option>
                 </select>
               </div>
               <div class="fs-field">
@@ -387,7 +413,6 @@
               <option value="announcement">重要公告</option>
               <option value="promotion">優惠活動</option>
               <option value="faq">FAQ</option>
-              <option value="terms">交易須知</option>
             </select>
           </div>
           <div class="fs-field">
@@ -447,12 +472,6 @@
       if (titleInput) titleInput.placeholder = "例如：代購商品多久會到貨？";
       if (contentInput) contentInput.placeholder = "輸入客人點選問題後要看到的答案";
       if (faqHint) faqHint.classList.add("is-visible");
-    } else if (type === "terms") {
-      if (titleLabel) titleLabel.textContent = "條款名稱";
-      if (contentLabel) contentLabel.textContent = "條款內容";
-      if (titleInput) titleInput.placeholder = "例如：付款與退款規則";
-      if (contentInput) contentInput.placeholder = "輸入交易須知內容";
-      if (faqHint) faqHint.classList.remove("is-visible");
     } else {
       if (titleLabel) titleLabel.textContent = "標題";
       if (contentLabel) contentLabel.textContent = "內容";
@@ -471,7 +490,7 @@
   const tabs = Array.from(document.querySelectorAll("#fsContentTabs .fs-tab"));
   const empty = document.getElementById("fsFilterEmpty");
 
-  const counts = {all: rows.length, announcement:0, promotion:0, faq:0, terms:0};
+  const counts = {all: rows.length, announcement:0, promotion:0, faq:0};
   rows.forEach(row => {
     const type = row.dataset.contentType;
     if (Object.prototype.hasOwnProperty.call(counts, type)) counts[type]++;
@@ -507,6 +526,93 @@
   });
 })();
 </script>
+
+
+
+  <section class="fs-terms-panel">
+    <div class="fs-panel-head">
+      <div class="fs-panel-title">
+        <span class="fs-section-icon"><i class="bi bi-file-earmark-text"></i></span>
+        <div>
+          <h2>交易須知</h2>
+          <p>交易須知只維護一份完整文件，不需要像 FAQ 一樣逐筆新增。</p>
+        </div>
+      </div>
+
+      <button type="button" class="fs-primary-btn" onclick="fsOpenDialog('fsTermsDialog')">
+        <i class="bi bi-pencil"></i>
+        {% if terms_document %}編輯交易須知{% else %}建立交易須知{% endif %}
+      </button>
+    </div>
+
+    {% if terms_document %}
+      <div class="fs-terms-meta">
+        {% if terms_document.is_active_bool %}
+          <span class="fs-chip on">前台顯示中</span>
+        {% else %}
+          <span class="fs-chip off">前台已隱藏</span>
+        {% endif %}
+        <span class="fs-chip">最後更新 {{ terms_document.updated_at }}</span>
+      </div>
+
+      <div class="fs-terms-preview">{{ terms_document.description or '尚未填寫內容' }}</div>
+    {% else %}
+      <div class="fs-terms-empty">
+        尚未建立交易須知。按右上角「建立交易須知」即可一次貼上整篇內容。
+      </div>
+    {% endif %}
+  </section>
+
+  <dialog class="fs-dialog" id="fsTermsDialog">
+    <div class="fs-dialog-head">
+      <strong>編輯交易須知</strong>
+      <button type="button" class="fs-close" onclick="fsCloseDialog('fsTermsDialog')">×</button>
+    </div>
+
+    <div class="fs-dialog-body">
+      <form method="post" action="/frontend-settings/terms/save">
+        <div class="fs-field">
+          <label>交易須知全文</label>
+          <textarea
+            name="description"
+            class="fs-terms-editor"
+            maxlength="20000"
+            required
+            placeholder="例如：
+
+歡迎使用橘貓代購 🐱
+
+為保障雙方權益，下單前請務必詳閱以下交易須知。
+
+01｜付款規範
+• 貨到付款僅限 NT$500 以下商品。
+• 訂製、預售商品不提供貨到付款。
+
+02｜提確及補郵商品
+• 提確後款項將支付給賣家，請自行評估交易風險。"
+          >{{ terms_document.description if terms_document else '' }}</textarea>
+        </div>
+
+        <div class="fs-terms-help">
+          前台會自動排版：像「01｜付款規範」這種行會顯示成段落標題；
+          以「•」開頭的行會顯示成條列。空白行會保留段落間距。
+        </div>
+
+        <label class="fs-active-check">
+          <input type="checkbox" name="is_active" value="1"
+                 {% if not terms_document or terms_document.is_active_bool %}checked{% endif %}>
+          <span>前台顯示</span>
+        </label>
+
+        <div class="fs-dialog-actions">
+          <span></span>
+          <button type="submit" class="fs-save">
+            <i class="bi bi-floppy"></i> 儲存交易須知
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
 
 
 <section class="frontend-card frontend-batch-section">
