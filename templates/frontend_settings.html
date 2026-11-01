@@ -619,27 +619,30 @@
   <div class="frontend-section-head">
     <div>
       <h2><span class="section-title-icon"><i class="bi bi-water"></i></span>近期運回船班</h2>
+      <p>船班只供賣貨便使用；選日期後，預計到貨時間自動計算為船班日後 6～8 天。</p>
     </div>
   </div>
 
   <form method="post" action="/frontend-settings/batches/add" class="frontend-batch-add">
     <div class="frontend-field">
-      <label>適用運回方式</label>
-      <select name="delivery_type">
-        <option value="home_delivery">宅配</option>
-        <option value="shop_delivery">賣貨便</option>
-      </select>
+      <label>船班日期</label>
+      <input type="date" name="ship_date" class="shipping-date-input" required>
     </div>
+
     <div class="frontend-field frontend-batch-text-field">
-      <label>船班文字</label>
-      <input type="text" name="batch_text" maxlength="255" placeholder="例如：10/5 海快船班｜預計 10/8-10/9 到台" required>
+      <label>前台顯示預覽</label>
+      <div class="shipping-batch-preview" data-preview>選擇日期後自動產生</div>
     </div>
+
     <div class="frontend-field frontend-sort-field">
       <label>排序</label>
       <input type="number" name="sort_order" min="0" max="9999" value="0" step="1">
     </div>
+
     <div class="frontend-add-action">
-      <button type="submit" class="frontend-primary"><i class="bi bi-plus-lg"></i><span>新增船班</span></button>
+      <button type="submit" class="frontend-primary">
+        <i class="bi bi-plus-lg"></i><span>新增船班</span>
+      </button>
     </div>
   </form>
 
@@ -649,7 +652,7 @@
     <article class="frontend-batch-item {% if not batch.is_active_bool %}inactive{% endif %}">
       <div class="frontend-batch-meta">
         <span class="frontend-batch-id">#{{ batch.batch_id }}</span>
-        <span class="frontend-batch-type">{{ batch.delivery_label }}</span>
+        <span class="frontend-batch-type">賣貨便</span>
         {% if batch.is_active_bool %}
           <span class="frontend-status active">顯示中</span>
         {% else %}
@@ -660,29 +663,45 @@
 
       <form method="post" action="/frontend-settings/batches/{{ batch.batch_id }}/save" class="frontend-batch-edit">
         <div class="frontend-field">
-          <label>運回方式</label>
-          <select name="delivery_type">
-            <option value="home_delivery" {% if batch.delivery_type == 'home_delivery' %}selected{% endif %}>宅配</option>
-            <option value="shop_delivery" {% if batch.delivery_type == 'shop_delivery' %}selected{% endif %}>賣貨便</option>
-          </select>
+          <label>船班日期</label>
+          <input
+            type="date"
+            name="ship_date"
+            class="shipping-date-input"
+            value="{{ batch.ship_date_input }}"
+            required
+          >
+          {% if not batch.ship_date_input %}
+          <small class="shipping-legacy-note">舊資料尚未設定日期，請重新選擇一次。</small>
+          {% endif %}
         </div>
+
         <div class="frontend-field frontend-batch-text-field">
-          <label>船班內容</label>
-          <input type="text" name="batch_text" maxlength="255" value="{{ batch.batch_text }}" required>
+          <label>前台顯示</label>
+          <div class="shipping-batch-preview" data-preview>{{ batch.batch_text }}</div>
         </div>
+
         <div class="frontend-field frontend-sort-field">
           <label>排序</label>
           <input type="number" name="sort_order" min="0" max="9999" value="{{ batch.sort_order }}" step="1">
         </div>
+
         <label class="frontend-active-check">
           <input type="checkbox" name="is_active" value="1" {% if batch.is_active_bool %}checked{% endif %}>
           <span>前台顯示</span>
         </label>
-        <button type="submit" class="frontend-save-btn"><i class="bi bi-floppy"></i><span>儲存</span></button>
+
+        <button type="submit" class="frontend-save-btn">
+          <i class="bi bi-floppy"></i><span>儲存</span>
+        </button>
       </form>
 
-      <form method="post" action="/frontend-settings/batches/{{ batch.batch_id }}/delete" class="frontend-delete-form" onsubmit="return confirm('確定要刪除船班 #{{ batch.batch_id }} 嗎？刪除後無法復原。')">
-        <button type="submit" class="frontend-delete-btn"><i class="bi bi-trash3"></i><span>刪除此船班</span></button>
+      <form method="post" action="/frontend-settings/batches/{{ batch.batch_id }}/delete"
+            class="frontend-delete-form"
+            onsubmit="return confirm('確定要刪除船班 #{{ batch.batch_id }} 嗎？刪除後無法復原。')">
+        <button type="submit" class="frontend-delete-btn">
+          <i class="bi bi-trash3"></i><span>刪除此船班</span>
+        </button>
       </form>
     </article>
     {% endfor %}
@@ -691,6 +710,59 @@
   <div class="empty-state">目前沒有任何船班設定。</div>
   {% endif %}
 </section>
+
+<style>
+.shipping-batch-preview{
+  min-height:44px;border:1px solid #e4e4e4;border-radius:9px;
+  background:#fff;padding:0 12px;display:flex;align-items:center;
+  color:#555;font-size:13px;line-height:1.5
+}
+.shipping-legacy-note{
+  color:#b4782c;font-size:10px;line-height:1.4
+}
+.shipping-date-input{cursor:pointer}
+</style>
+
+<script>
+(function(){
+  function md(date){
+    return `${date.getMonth()+1}/${date.getDate()}`;
+  }
+
+  function parseDate(value){
+    if (!value) return null;
+    const parts = value.split("-").map(Number);
+    if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+    return new Date(parts[0], parts[1]-1, parts[2]);
+  }
+
+  function previewText(value){
+    const ship = parseDate(value);
+    if (!ship) return "選擇日期後自動產生";
+
+    const start = new Date(ship);
+    const end = new Date(ship);
+    start.setDate(start.getDate() + 6);
+    end.setDate(end.getDate() + 8);
+
+    return `${md(ship)} 海快船班｜預計 ${md(start)}～${md(end)} 到超商`;
+  }
+
+  document.querySelectorAll(".shipping-date-input").forEach(input => {
+    const form = input.closest("form");
+    const preview = form?.querySelector("[data-preview]");
+
+    const update = () => {
+      if (preview) preview.textContent = previewText(input.value);
+    };
+
+    input.addEventListener("input", update);
+    input.addEventListener("change", update);
+
+    if (input.value) update();
+  });
+})();
+</script>
 
 </div>
 {% endblock %}
