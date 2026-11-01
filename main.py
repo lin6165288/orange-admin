@@ -6,7 +6,7 @@ import logging
 import re
 
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN, ROUND_HALF_UP
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional
 from urllib.parse import urlparse, unquote, quote
@@ -6406,6 +6406,7 @@ def ensure_frontend_config_tables_admin():
                 CREATE TABLE IF NOT EXISTS shipping_batches (
                     batch_id INT AUTO_INCREMENT PRIMARY KEY,
                     batch_text VARCHAR(255) NOT NULL,
+                    ship_date DATE NULL,
                     delivery_type VARCHAR(30) NOT NULL DEFAULT 'home_delivery',
                     sort_order INT NOT NULL DEFAULT 0,
                     is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -6437,6 +6438,7 @@ def ensure_frontend_config_tables_admin():
             cursor.execute("SHOW COLUMNS FROM shipping_batches")
             existing = {row["Field"] for row in cursor.fetchall()}
             additions = {
+                "ship_date": "DATE NULL",
                 "delivery_type": "VARCHAR(30) NOT NULL DEFAULT 'home_delivery'",
                 "sort_order": "INT NOT NULL DEFAULT 0",
                 "is_active": "TINYINT(1) NOT NULL DEFAULT 1",
@@ -6480,8 +6482,42 @@ def ensure_frontend_config_tables_admin():
         conn.close()
 
 
+
+def cleanup_expired_shipping_batches():
+    """
+    自動刪除已過日期的船班。
+    - ship_date < CURDATE()：刪除
+    - 今天的船班保留
+    - ship_date IS NULL 的舊資料不刪除，避免誤刪
+    """
+    ensure_frontend_config_tables_admin()
+    conn = get_db()
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM shipping_batches
+                WHERE ship_date IS NOT NULL
+                  AND ship_date < CURDATE()
+                """
+            )
+            deleted = int(cursor.rowcount or 0)
+
+        conn.commit()
+        return deleted
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+
+
 def frontend_settings_context(message="", error=""):
     ensure_frontend_config_tables_admin()
+    cleanup_expired_shipping_batches()
     conn = get_db()
     try:
         with conn.cursor() as cursor:
@@ -6501,7 +6537,7 @@ def frontend_settings_context(message="", error=""):
 
             cursor.execute(
                 """
-                SELECT batch_id, batch_text, delivery_type,
+                SELECT batch_id, batch_text, ship_date, delivery_type,
                        sort_order, is_active, updated_at, created_at
                 FROM shipping_batches
                 ORDER BY delivery_type ASC,
@@ -6557,6 +6593,15 @@ def frontend_settings_context(message="", error=""):
             row.get("delivery_type"), "宅配"
         )
         row["is_active_bool"] = bool(row.get("is_active"))
+
+        ship_date_value = row.get("ship_date")
+        if ship_date_value:
+            try:
+                row["ship_date_input"] = ship_date_value.strftime("%Y-%m-%d")
+            except AttributeError:
+                row["ship_date_input"] = str(ship_date_value)
+        else:
+            row["ship_date_input"] = ""
 
     return {
         "orders_last_update_time": settings.get("orders_last_update_time", {}).get("setting_value") or "尚未設定",
@@ -7039,95 +7084,162 @@ def frontend_delete_content(
     return _frontend_redirect(message=f"前台內容 #{content_id} 已刪除。")
 
 
+
+def _parse_shipping_date(value: str):
+    value = str(value or "").strip()
+
+    if not value:
+        return None
+
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _shipping_batch_text(ship_date_value):
+    eta_start = ship_date_value + timedelta(days=6)
+    eta_end = ship_date_value + timedelta(days=8)
+
+    return (
+        f"{ship_date_value.month}/{ship_date_value.day} 海快船班｜"
+        f"預計 {eta_start.month}/{eta_start.day}～"
+        f"{eta_end.month}/{eta_end.day} 到超商"
+    )
+
+
 @app.post("/frontend-settings/batches/add")
 def frontend_add_shipping_batch(
     request: Request,
-    delivery_type: str = Form("home_delivery"),
-    batch_text: str = Form(""),
+    ship_date: str = Form(""),
     sort_order: int = Form(0),
     admin: str = Depends(verify_admin),
 ):
     _check_same_origin(request)
     ensure_frontend_config_tables_admin()
-    delivery_type = str(delivery_type or "")
-    batch_text = str(batch_text or "").strip()
-    if delivery_type not in FRONTEND_DELIVERY_TYPES:
-        return _frontend_redirect(error="運回方式不正確。")
-    if not batch_text:
-        return _frontend_redirect(error="請輸入船班文字。")
-    if len(batch_text) > 255:
-        return _frontend_redirect(error="船班文字最多 255 個字。")
+    cleanup_expired_shipping_batches()
+
+    ship_date_value = _parse_shipping_date(ship_date)
+
+    if ship_date_value is None:
+        return _frontend_redirect(error="請選擇有效的船班日期。")
+
+    if ship_date_value < datetime.now(ZoneInfo("Asia/Taipei")).date():
+        return _frontend_redirect(error="船班日期不能早於今天。")
+
+    batch_text = _shipping_batch_text(ship_date_value)
     sort_order = max(0, min(int(sort_order or 0), 9999))
 
     conn = get_db()
+
     try:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
                 INSERT INTO shipping_batches
-                    (batch_text, delivery_type, sort_order, is_active)
-                VALUES (%s, %s, %s, 1)
+                    (
+                        batch_text,
+                        ship_date,
+                        delivery_type,
+                        sort_order,
+                        is_active
+                    )
+                VALUES (%s, %s, 'shop_delivery', %s, 1)
                 """,
-                (batch_text, delivery_type, sort_order),
+                (
+                    batch_text,
+                    ship_date_value,
+                    sort_order,
+                ),
             )
+
         conn.commit()
+
     except Exception:
         conn.rollback()
         raise
+
     finally:
         conn.close()
-    return _frontend_redirect(message="已新增船班。")
+
+    return _frontend_redirect(message=f"已新增 {batch_text}。")
 
 
 @app.post("/frontend-settings/batches/{batch_id}/save")
 def frontend_save_shipping_batch(
     request: Request,
     batch_id: int,
-    delivery_type: str = Form("home_delivery"),
-    batch_text: str = Form(""),
+    ship_date: str = Form(""),
     sort_order: int = Form(0),
     is_active: Optional[str] = Form(None),
     admin: str = Depends(verify_admin),
 ):
     _check_same_origin(request)
     ensure_frontend_config_tables_admin()
-    delivery_type = str(delivery_type or "")
-    batch_text = str(batch_text or "").strip()
-    if delivery_type not in FRONTEND_DELIVERY_TYPES:
-        return _frontend_redirect(error="運回方式不正確。")
-    if not batch_text:
-        return _frontend_redirect(error="船班文字不可空白。")
-    if len(batch_text) > 255:
-        return _frontend_redirect(error="船班文字最多 255 個字。")
+    cleanup_expired_shipping_batches()
+
+    ship_date_value = _parse_shipping_date(ship_date)
+
+    if ship_date_value is None:
+        return _frontend_redirect(error="請選擇有效的船班日期。")
+
+    if ship_date_value < datetime.now(ZoneInfo("Asia/Taipei")).date():
+        return _frontend_redirect(error="船班日期不能早於今天。")
+
+    batch_text = _shipping_batch_text(ship_date_value)
     sort_order = max(0, min(int(sort_order or 0), 9999))
     active_value = 1 if is_active == "1" else 0
 
     conn = get_db()
+
     try:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
                 UPDATE shipping_batches
-                SET batch_text = %s,
-                    delivery_type = %s,
+                SET
+                    batch_text = %s,
+                    ship_date = %s,
+                    delivery_type = 'shop_delivery',
                     sort_order = %s,
                     is_active = %s
                 WHERE batch_id = %s
                 """,
-                (batch_text, delivery_type, sort_order, active_value, batch_id),
+                (
+                    batch_text,
+                    ship_date_value,
+                    sort_order,
+                    active_value,
+                    batch_id,
+                ),
             )
+
             if cursor.rowcount == 0:
-                cursor.execute("SELECT batch_id FROM shipping_batches WHERE batch_id = %s", (batch_id,))
+                cursor.execute(
+                    """
+                    SELECT batch_id
+                    FROM shipping_batches
+                    WHERE batch_id = %s
+                    """,
+                    (batch_id,),
+                )
+
                 if not cursor.fetchone():
                     conn.rollback()
                     return _frontend_redirect(error="找不到這筆船班。")
+
         conn.commit()
+
     except Exception:
         conn.rollback()
         raise
+
     finally:
         conn.close()
-    return _frontend_redirect(message=f"船班 #{batch_id} 已更新。")
+
+    return _frontend_redirect(
+        message=f"船班 #{batch_id} 已更新為 {batch_text}。"
+    )
 
 
 @app.post("/frontend-settings/batches/{batch_id}/delete")
