@@ -6577,7 +6577,30 @@ def frontend_settings_context(message="", error=""):
                 ),
             }
             for row in contents
+            if row.get("content_type") != "terms"
         ],
+        "terms_document": next(
+            (
+                {
+                    **row,
+                    "is_active_bool": bool(row.get("is_active")),
+                }
+                for row in contents
+                if row.get("content_type") == "terms"
+                and bool(row.get("is_active"))
+            ),
+            next(
+                (
+                    {
+                        **row,
+                        "is_active_bool": bool(row.get("is_active")),
+                    }
+                    for row in contents
+                    if row.get("content_type") == "terms"
+                ),
+                None,
+            ),
+        ),
         "message": str(message or ""),
         "error": str(error or ""),
     }
@@ -6752,6 +6775,110 @@ def _validate_frontend_content_fields(
         "tag_label": tag_label,
         "sort_order": sort_value,
     }, ""
+
+
+
+@app.post("/frontend-settings/terms/save")
+def frontend_save_terms_document(
+    request: Request,
+    description: str = Form(""),
+    is_active: Optional[str] = Form(None),
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+
+    description = str(description or "").strip()
+
+    if not description:
+        return _frontend_redirect(error="請輸入交易須知內容。")
+
+    if len(description) > 20000:
+        return _frontend_redirect(error="交易須知最多 20,000 個字。")
+
+    active_value = 1 if is_active == "1" else 0
+
+    conn = get_db()
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT content_id
+                FROM frontend_contents
+                WHERE content_type = 'terms'
+                ORDER BY is_active DESC, content_id DESC
+                LIMIT 1
+                """
+            )
+            existing = cursor.fetchone()
+
+            if existing:
+                content_id = int(existing["content_id"])
+
+                cursor.execute(
+                    """
+                    UPDATE frontend_contents
+                    SET
+                        title = '交易須知',
+                        description = %s,
+                        tag_label = NULL,
+                        sort_order = 0,
+                        is_active = %s
+                    WHERE content_id = %s
+                    """,
+                    (
+                        description,
+                        active_value,
+                        content_id,
+                    ),
+                )
+
+                cursor.execute(
+                    """
+                    UPDATE frontend_contents
+                    SET is_active = 0
+                    WHERE content_type = 'terms'
+                      AND content_id <> %s
+                    """,
+                    (content_id,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO frontend_contents (
+                        content_type,
+                        title,
+                        description,
+                        tag_label,
+                        sort_order,
+                        is_active
+                    )
+                    VALUES (
+                        'terms',
+                        '交易須知',
+                        %s,
+                        NULL,
+                        0,
+                        %s
+                    )
+                    """,
+                    (
+                        description,
+                        active_value,
+                    ),
+                )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+
+    return _frontend_redirect(message="交易須知已更新。")
 
 
 @app.post("/frontend-settings/contents/add")
