@@ -7108,6 +7108,243 @@ def _shipping_batch_text(ship_date_value):
     )
 
 
+
+@app.post("/frontend-settings/batches/bulk-add")
+async def frontend_bulk_add_shipping_batches(
+    request: Request,
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+    cleanup_expired_shipping_batches()
+
+    form = await request.form()
+    raw_dates = form.getlist("ship_dates")
+    sort_order = int(form.get("sort_order") or 0)
+    sort_order = max(0, min(sort_order, 9999))
+
+    dates = []
+    seen = set()
+
+    for raw in raw_dates:
+        value = _parse_shipping_date(raw)
+
+        if value is None:
+            continue
+
+        if value < datetime.now(ZoneInfo("Asia/Taipei")).date():
+            continue
+
+        key = value.isoformat()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        dates.append(value)
+
+    if not dates:
+        return _frontend_redirect(
+            error="請至少選擇一個今天或未來的船班日期。"
+        )
+
+    dates.sort()
+
+    conn = get_db()
+
+    try:
+        with conn.cursor() as cursor:
+            inserted = 0
+            skipped = 0
+
+            for index, ship_date_value in enumerate(dates):
+                cursor.execute(
+                    """
+                    SELECT batch_id
+                    FROM shipping_batches
+                    WHERE ship_date = %s
+                      AND delivery_type = 'shop_delivery'
+                    LIMIT 1
+                    """,
+                    (ship_date_value,),
+                )
+
+                if cursor.fetchone():
+                    skipped += 1
+                    continue
+
+                batch_text = _shipping_batch_text(ship_date_value)
+
+                cursor.execute(
+                    """
+                    INSERT INTO shipping_batches
+                        (
+                            batch_text,
+                            ship_date,
+                            delivery_type,
+                            sort_order,
+                            is_active
+                        )
+                    VALUES (%s, %s, 'shop_delivery', %s, 1)
+                    """,
+                    (
+                        batch_text,
+                        ship_date_value,
+                        sort_order + index,
+                    ),
+                )
+                inserted += 1
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+
+    msg = f"已新增 {inserted} 筆船班。"
+
+    if skipped:
+        msg += f" 另有 {skipped} 筆重複日期已略過。"
+
+    return _frontend_redirect(message=msg)
+
+
+@app.post("/frontend-settings/batches/bulk-update")
+async def frontend_bulk_update_shipping_batches(
+    request: Request,
+    admin: str = Depends(verify_admin),
+):
+    _check_same_origin(request)
+    ensure_frontend_config_tables_admin()
+    cleanup_expired_shipping_batches()
+
+    form = await request.form()
+    raw_ids = form.getlist("selected_batch_ids")
+    action = str(form.get("bulk_action") or "").strip()
+    sort_order_raw = str(form.get("bulk_sort_order") or "").strip()
+
+    ids = []
+    seen = set()
+
+    for raw in raw_ids:
+        try:
+            batch_id = int(raw)
+        except (TypeError, ValueError):
+            continue
+
+        if batch_id > 0 and batch_id not in seen:
+            seen.add(batch_id)
+            ids.append(batch_id)
+
+    if not ids:
+        return _frontend_redirect(error="請先勾選至少一筆船班。")
+
+    if len(ids) > 100:
+        return _frontend_redirect(error="一次最多編輯 100 筆船班。")
+
+    allowed_actions = {
+        "activate",
+        "deactivate",
+        "delete",
+        "set_sort",
+    }
+
+    if action not in allowed_actions:
+        return _frontend_redirect(error="請選擇批次操作。")
+
+    placeholders = ",".join(["%s"] * len(ids))
+    conn = get_db()
+
+    try:
+        with conn.cursor() as cursor:
+            if action == "activate":
+                cursor.execute(
+                    f"""
+                    UPDATE shipping_batches
+                    SET is_active = 1
+                    WHERE batch_id IN ({placeholders})
+                    """,
+                    ids,
+                )
+
+            elif action == "deactivate":
+                cursor.execute(
+                    f"""
+                    UPDATE shipping_batches
+                    SET is_active = 0
+                    WHERE batch_id IN ({placeholders})
+                    """,
+                    ids,
+                )
+
+            elif action == "delete":
+                cursor.execute(
+                    f"""
+                    DELETE FROM shipping_batches
+                    WHERE batch_id IN ({placeholders})
+                    """,
+                    ids,
+                )
+
+            elif action == "set_sort":
+                try:
+                    base_sort = int(sort_order_raw)
+                except (TypeError, ValueError):
+                    return _frontend_redirect(error="請輸入有效的排序數字。")
+
+                base_sort = max(0, min(base_sort, 9999))
+
+                cursor.execute(
+                    f"""
+                    SELECT batch_id
+                    FROM shipping_batches
+                    WHERE batch_id IN ({placeholders})
+                    ORDER BY ship_date ASC, batch_id ASC
+                    """,
+                    ids,
+                )
+
+                ordered_ids = [
+                    int(row["batch_id"])
+                    for row in cursor.fetchall()
+                ]
+
+                for index, batch_id in enumerate(ordered_ids):
+                    cursor.execute(
+                        """
+                        UPDATE shipping_batches
+                        SET sort_order = %s
+                        WHERE batch_id = %s
+                        """,
+                        (base_sort + index, batch_id),
+                    )
+
+            changed = int(cursor.rowcount or 0)
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        conn.close()
+
+    labels = {
+        "activate": "設為顯示",
+        "deactivate": "設為隱藏",
+        "delete": "刪除",
+        "set_sort": "更新排序",
+    }
+
+    return _frontend_redirect(
+        message=f"已批次{labels[action]} {len(ids)} 筆船班。"
+    )
+
+
 @app.post("/frontend-settings/batches/add")
 def frontend_add_shipping_batch(
     request: Request,
