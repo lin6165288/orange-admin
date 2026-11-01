@@ -31,6 +31,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse, Response
 from shipping_excel import make_sellnow_xlsm, make_shipping_detail_xlsx
 from profit_excel import make_profit_xlsx
+from member_balance_excel import make_member_balance_xlsx
 
 
 # =========================================================
@@ -4385,6 +4386,38 @@ def members_search(
             "member_levels": MEMBER_LEVELS,
             "pagination": pagination,
             "total_balance": total_balance,
+        },
+    )
+
+
+@app.get("/members/export-balances")
+def export_member_balances(admin: str = Depends(verify_admin)):
+    ensure_members_table_admin()
+    ensure_customer_payment_balance_schema()
+    conn = get_db()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT m.customer_name, mb.balance
+                FROM members m
+                INNER JOIN member_balances mb ON mb.member_id = m.member_id
+                WHERE mb.balance > 0
+                ORDER BY mb.balance DESC, m.customer_name ASC
+            """)
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    data = make_member_balance_xlsx(rows)
+    today = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m%d")
+    filename = f"會員儲值金餘額_{today}.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 
