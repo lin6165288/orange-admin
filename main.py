@@ -4009,38 +4009,61 @@ def member_order_stats(names):
         conn.close()
 
 
-def member_rows(keyword="", level="all"):
-    sync_members_from_orders_admin()
+def member_rows(keyword="", level="all", page=1, per_page=50):
+    """
+    會員管理列表：
+    - 不再每次進頁面都從 orders 全量同步 members。
+    - 預設只抓當頁會員，避免一次渲染 500 人。
+    - 訂單統計只計算當頁會員。
+    """
+    ensure_members_table_admin()
+    ensure_customer_payment_balance_schema()
+
     keyword = str(keyword or "").strip()[:100]
     level = str(level or "all")
+
     if level not in ("all",) + MEMBER_LEVELS:
         level = "all"
 
+    try:
+        page = max(1, int(page or 1))
+    except (TypeError, ValueError):
+        page = 1
+
+    try:
+        per_page = int(per_page or 50)
+    except (TypeError, ValueError):
+        per_page = 50
+
+    per_page = max(20, min(per_page, 100))
+
     where = ["1=1"]
     params = []
+
     if keyword:
-        where.append("(customer_name LIKE %s OR COALESCE(line_name,'') LIKE %s)")
+        where.append(
+            """
+            (
+                customer_name LIKE %s
+                OR COALESCE(line_name,'') LIKE %s
+                OR COALESCE(line_user_id,'') LIKE %s
+            )
+            """
+        )
         like = f"%{keyword}%"
-        params.extend([like, like])
+        params.extend([like, like, like])
+
     if level != "all":
         where.append("member_level = %s")
         params.append(level)
 
+    where_sql = " AND ".join(where)
+
     conn = get_db()
+
     try:
         with conn.cursor() as cursor:
-            cursor.execute(
-                f"""
-                SELECT member_id, customer_name, member_level, note,
-                       line_user_id, line_name, created_at, updated_at
-                FROM members
-                WHERE {' AND '.join(where)}
-                ORDER BY updated_at DESC, member_id DESC
-                LIMIT 500
-                """,
-                params,
-            )
-            rows = cursor.fetchall()
+            # 所有會員等級統計（不受目前搜尋條件影響）
             cursor.execute(
                 """
                 SELECT member_level, COUNT(*) AS cnt
@@ -4048,20 +4071,125 @@ def member_rows(keyword="", level="all"):
                 GROUP BY member_level
                 """
             )
-            counts = {row["member_level"]: int(row["cnt"] or 0) for row in cursor.fetchall()}
+            counts = {
+                row["member_level"]: int(row["cnt"] or 0)
+                for row in cursor.fetchall()
+            }
+
+            cursor.execute(
+                "SELECT COUNT(*) AS cnt FROM members"
+            )
+            all_member_count = int(
+                (cursor.fetchone() or {}).get("cnt") or 0
+            )
+
+            # 所有會員目前儲值金餘額加總
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(balance), 0) AS total_balance
+                FROM member_balances
+                """
+            )
+            total_balance_row = cursor.fetchone() or {}
+            total_balance = Decimal(
+                str(total_balance_row.get("total_balance") or 0)
+            ).quantize(Decimal("0.01"))
+
+            # 目前搜尋條件筆數
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) AS cnt
+                FROM members
+                WHERE {where_sql}
+                """,
+                params,
+            )
+            filtered_count = int(
+                (cursor.fetchone() or {}).get("cnt") or 0
+            )
+
+            total_pages = max(
+                1,
+                (filtered_count + per_page - 1) // per_page
+            )
+
+            if page > total_pages:
+                page = total_pages
+
+            offset = (page - 1) * per_page
+
+            cursor.execute(
+                f"""
+                SELECT
+                    member_id,
+                    customer_name,
+                    member_level,
+                    note,
+                    line_user_id,
+                    line_name,
+                    created_at,
+                    updated_at
+                FROM members
+                WHERE {where_sql}
+                ORDER BY updated_at DESC, member_id DESC
+                LIMIT %s OFFSET %s
+                """,
+                params + [per_page, offset],
+            )
+            rows = cursor.fetchall()
+
     finally:
         conn.close()
 
-    stats = member_order_stats([row.get("customer_name") for row in rows])
+    # 只計算本頁會員的訂單統計
+    stats = member_order_stats(
+        [row.get("customer_name") for row in rows]
+    )
+
     for row in rows:
         st = stats.get(str(row.get("customer_name")), {})
-        row["order_count"] = int(st.get("order_count") or 0)
-        row["unreturned_count"] = int(st.get("unreturned_count") or 0)
-        row["total_weight_num"] = float(st.get("total_weight") or 0)
+        row["order_count"] = int(
+            st.get("order_count") or 0
+        )
+        row["unreturned_count"] = int(
+            st.get("unreturned_count") or 0
+        )
+        row["total_weight_num"] = float(
+            st.get("total_weight") or 0
+        )
         row["last_order_date"] = st.get("last_order_date")
+
         if row.get("member_level") not in MEMBER_LEVELS:
             row["member_level"] = "一般會員"
-    return rows, counts, keyword, level
+
+    pagination = {
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+        "filtered_count": filtered_count,
+        "all_member_count": all_member_count,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_page": max(1, page - 1),
+        "next_page": min(total_pages, page + 1),
+        "start_item": (
+            offset + 1 if filtered_count > 0 else 0
+        ),
+        "end_item": min(
+            offset + len(rows),
+            filtered_count,
+        ),
+    }
+
+    return (
+        rows,
+        counts,
+        keyword,
+        level,
+        pagination,
+        total_balance,
+    )
+
 
 
 def fetch_member_admin(member_id: int):
@@ -4187,9 +4315,24 @@ def members_page(
     request: Request,
     keyword: str = "",
     level: str = "all",
+    page: int = 1,
+    per_page: int = 50,
     admin: str = Depends(verify_admin),
 ):
-    rows, counts, keyword, level = member_rows(keyword, level)
+    (
+        rows,
+        counts,
+        keyword,
+        level,
+        pagination,
+        total_balance,
+    ) = member_rows(
+        keyword,
+        level,
+        page,
+        per_page,
+    )
+
     return templates.TemplateResponse(
         request=request,
         name="members.html",
@@ -4199,6 +4342,8 @@ def members_page(
             "keyword": keyword,
             "level": level,
             "member_levels": MEMBER_LEVELS,
+            "pagination": pagination,
+            "total_balance": total_balance,
         },
     )
 
@@ -4208,9 +4353,24 @@ def members_search(
     request: Request,
     keyword: str = "",
     level: str = "all",
+    page: int = 1,
+    per_page: int = 50,
     admin: str = Depends(verify_admin),
 ):
-    rows, counts, keyword, level = member_rows(keyword, level)
+    (
+        rows,
+        counts,
+        keyword,
+        level,
+        pagination,
+        total_balance,
+    ) = member_rows(
+        keyword,
+        level,
+        page,
+        per_page,
+    )
+
     return templates.TemplateResponse(
         request=request,
         name="members_results.html",
@@ -4220,6 +4380,8 @@ def members_search(
             "keyword": keyword,
             "level": level,
             "member_levels": MEMBER_LEVELS,
+            "pagination": pagination,
+            "total_balance": total_balance,
         },
     )
 
