@@ -4083,11 +4083,14 @@ def member_rows(keyword="", level="all", page=1, per_page=50):
                 (cursor.fetchone() or {}).get("cnt") or 0
             )
 
-            # 所有會員目前儲值金餘額加總
+            # 目前仍存在於 members 的會員儲值金餘額加總
+            # 避免 member_balances 中歷史殘留 / 孤兒 member_id 被一起計入。
             cursor.execute(
                 """
-                SELECT COALESCE(SUM(balance), 0) AS total_balance
-                FROM member_balances
+                SELECT COALESCE(SUM(mb.balance), 0) AS total_balance
+                FROM members m
+                INNER JOIN member_balances mb
+                    ON mb.member_id = m.member_id
                 """
             )
             total_balance_row = cursor.fetchone() or {}
