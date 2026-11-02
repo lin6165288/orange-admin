@@ -109,6 +109,70 @@
             <label for="new-remarks">備註（選填）</label>
             <textarea name="remarks" id="new-remarks" rows="3" placeholder="輸入備註">{{ remarks }}</textarea>
         </div>
+        {% if balance_prompt %}
+        <div class="balance-recharge-modal-backdrop" id="balanceRechargeModal" role="dialog" aria-modal="true" aria-labelledby="balanceRechargeTitle">
+            <div class="balance-recharge-modal">
+                <div class="balance-recharge-modal-head">
+                    <div>
+                        <div class="balance-recharge-kicker">VIP 儲值金扣款</div>
+                        <h3 id="balanceRechargeTitle">餘額不足，是否有充值？</h3>
+                    </div>
+                    <button type="button" class="balance-recharge-close" onclick="closeBalanceRechargeModal()" aria-label="關閉">×</button>
+                </div>
+
+                <p class="balance-recharge-message">{{ balance_prompt_message }}</p>
+
+                <div class="balance-recharge-summary">
+                    <div>
+                        <span>目前餘額</span>
+                        <strong>NT$ {{ '%.2f'|format(member_balance|float) }}</strong>
+                    </div>
+                    <div>
+                        <span>本單需扣款</span>
+                        <strong>NT$ {{ '%.2f'|format(balance_required_twd|float) }}</strong>
+                    </div>
+                    <div class="is-shortage">
+                        <span>目前尚差</span>
+                        <strong>NT$ {{ '%.2f'|format(balance_shortage_twd|float) }}</strong>
+                    </div>
+                </div>
+
+                <div class="edit-field create-field balance-recharge-input">
+                    <label for="balance-recharge-amount">本次充值金額</label>
+                    <div class="input-prefix">
+                        <span>NT$</span>
+                        <input
+                            id="balance-recharge-amount"
+                            name="balance_recharge_amount"
+                            type="number"
+                            min="0.01"
+                            max="999999999.99"
+                            step="0.01"
+                            value="{{ balance_recharge_amount }}"
+                            placeholder="輸入會員本次實際充值金額"
+                            autofocus
+                        >
+                    </div>
+                    <small>
+                        有輸入金額時，新增訂單成功後會同步增加會員餘額並寫入「儲值」紀錄，再扣除此筆訂單。
+                    </small>
+                </div>
+
+                <div class="balance-recharge-actions">
+                    <button type="button" class="reset-button" onclick="closeBalanceRechargeModal()">
+                        沒有充值／返回修改
+                    </button>
+                    <button type="submit" class="edit-save">
+                        <i class="bi bi-wallet2"></i>
+                        充值並新增訂單
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <input type="hidden" name="balance_recharge_amount" value="">
+        {% endif %}
+
         <div class="create-footer">
             <label class="edit-checkbox"><input type="checkbox" name="keep_last_name" value="1" {% if keep_last_name %}checked{% endif %}> 新增後保留此客戶姓名</label>
             <div class="create-actions"><span id="create-loading" class="htmx-indicator">新增中…</span><button type="submit" class="edit-save">✅ 新增訂單</button></div>
@@ -116,7 +180,114 @@
     </form>
 </section>
 
+<style>
+.balance-recharge-modal-backdrop{
+    position:fixed;
+    inset:0;
+    z-index:9999;
+    background:rgba(20,20,20,.42);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:18px;
+}
+.balance-recharge-modal{
+    width:min(520px,100%);
+    background:#fff;
+    border-radius:18px;
+    box-shadow:0 20px 60px rgba(0,0,0,.18);
+    padding:20px;
+}
+.balance-recharge-modal-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+}
+.balance-recharge-modal-head h3{
+    margin:3px 0 0;
+    font-size:20px;
+}
+.balance-recharge-kicker{
+    color:#c87314;
+    font-size:11px;
+    font-weight:700;
+}
+.balance-recharge-close{
+    width:34px;
+    height:34px;
+    border:0;
+    border-radius:10px;
+    background:#f5f5f5;
+    color:#777;
+    font-size:20px;
+    cursor:pointer;
+}
+.balance-recharge-message{
+    margin:14px 0;
+    color:#666;
+    font-size:13px;
+}
+.balance-recharge-summary{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:8px;
+    margin-bottom:16px;
+}
+.balance-recharge-summary > div{
+    background:#f7f7f7;
+    border-radius:12px;
+    padding:11px;
+}
+.balance-recharge-summary span{
+    display:block;
+    color:#999;
+    font-size:10px;
+    margin-bottom:4px;
+}
+.balance-recharge-summary strong{
+    font-size:14px;
+}
+.balance-recharge-summary .is-shortage{
+    background:#fff3f1;
+}
+.balance-recharge-summary .is-shortage strong{
+    color:#c94f3d;
+}
+.balance-recharge-input small{
+    display:block;
+    margin-top:6px;
+    color:#999;
+    font-size:10px;
+    line-height:1.6;
+}
+.balance-recharge-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+    margin-top:18px;
+}
+@media(max-width:620px){
+    .balance-recharge-summary{
+        grid-template-columns:1fr;
+    }
+    .balance-recharge-actions{
+        flex-direction:column-reverse;
+    }
+    .balance-recharge-actions button{
+        width:100%;
+    }
+}
+</style>
+
 <script>
+function closeBalanceRechargeModal() {
+    const modal = document.getElementById('balanceRechargeModal');
+    if (modal) modal.remove();
+    const rechargeInput = document.querySelector('input[name="balance_recharge_amount"]');
+    if (rechargeInput) rechargeInput.value = '';
+}
+
 function toggleCardCostField() {
     const selected = document.querySelector('input[name="purchase_payment_method"]:checked');
     const block = document.getElementById('card-cost-field');
