@@ -2479,6 +2479,11 @@ def add_order_context(**updates):
         "customer_payment_method": "bank_transfer",
         "current_exchange_rate": Decimal("4.7800"),
         "member_balance": Decimal("0.00"),
+        "balance_recharge_amount": "",
+        "balance_prompt": False,
+        "balance_prompt_message": "",
+        "balance_required_twd": Decimal("0.00"),
+        "balance_shortage_twd": Decimal("0.00"),
         "weight_kg": "0.00",
         "is_arrived": False,
         "is_returned": False,
@@ -2633,6 +2638,7 @@ def create_order(
     purchase_payment_method: str = Form("alipay"),
     card_cost_twd: str = Form(""),
     customer_payment_method: str = Form("bank_transfer"),
+    balance_recharge_amount: str = Form(""),
     weight_kg: str = Form("0"),
     is_arrived: Optional[str] = Form(None),
     is_returned: Optional[str] = Form(None),
@@ -2652,6 +2658,7 @@ def create_order(
                   purchase_payment_method=purchase_method,
                   card_cost_twd=card_cost_twd,
                   customer_payment_method=customer_method,
+                  balance_recharge_amount=balance_recharge_amount,
                   weight_kg=weight_kg, is_arrived=is_arrived == "1",
                   is_returned=is_returned == "1", remarks=remarks,
                   keep_last_name=keep_name)
@@ -2689,6 +2696,22 @@ def create_order(
     if purchase_method == "alipay":
         card_cost = None
 
+    recharge_amount = Decimal("0.00")
+    recharge_raw = str(balance_recharge_amount or "").strip()
+
+    if recharge_raw:
+        try:
+            recharge_amount = Decimal(recharge_raw).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            return bad("請輸入正確的充值金額")
+
+        if (
+            not recharge_amount.is_finite()
+            or recharge_amount <= 0
+            or recharge_amount > Decimal("999999999.99")
+        ):
+            return bad("充值金額必須大於 0，且不可超過 NT$999,999,999.99")
+
     # DDL should not run in an order transaction; fail closed if auditing is unavailable.
     ensure_order_cost_columns()
     ensure_customer_payment_balance_schema()
@@ -2711,6 +2734,67 @@ def create_order(
                 amount, level, platform, customer_method
             )
             total_twd = customer_total_for_order(amount, rate, fee)
+
+            if customer_method == "balance":
+                current_balance = member_balance_locked(cursor, member_id)
+                shortage = max(
+                    Decimal("0.00"),
+                    (total_twd - current_balance).quantize(Decimal("0.01")),
+                )
+
+                if shortage > 0 and recharge_amount <= 0:
+                    conn.rollback()
+                    return templates.TemplateResponse(
+                        request=request,
+                        name="new_order_panel.html",
+                        context=new_order_page_context(
+                            **inputs,
+                            member_balance=current_balance,
+                            balance_recharge_amount="",
+                            balance_prompt=True,
+                            balance_prompt_message="會員餘額不足，是否有充值？",
+                            balance_required_twd=total_twd,
+                            balance_shortage_twd=shortage,
+                        ),
+                        status_code=200,
+                    )
+
+                if recharge_amount > 0:
+                    balance_after_recharge = (
+                        current_balance + recharge_amount
+                    ).quantize(Decimal("0.01"))
+
+                    if balance_after_recharge < total_twd:
+                        shortage_after = (
+                            total_twd - balance_after_recharge
+                        ).quantize(Decimal("0.01"))
+                        conn.rollback()
+                        return templates.TemplateResponse(
+                            request=request,
+                            name="new_order_panel.html",
+                            context=new_order_page_context(
+                                **inputs,
+                                member_balance=current_balance,
+                                balance_recharge_amount=str(recharge_amount),
+                                balance_prompt=True,
+                                balance_prompt_message=(
+                                    "充值後餘額仍不足，請確認充值金額。"
+                                ),
+                                balance_required_twd=total_twd,
+                                balance_shortage_twd=shortage_after,
+                            ),
+                            status_code=200,
+                        )
+
+                    change_member_balance(
+                        cursor,
+                        member_id=member_id,
+                        change_amount=recharge_amount,
+                        action_type="recharge",
+                        admin_username=admin,
+                        note="新增訂單時充值",
+                        prevent_negative=True,
+                    )
 
             cursor.execute(
                 """INSERT INTO orders
