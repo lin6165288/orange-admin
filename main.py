@@ -2744,19 +2744,23 @@ def create_order(
 
                 if shortage > 0 and recharge_amount <= 0:
                     conn.rollback()
-                    return templates.TemplateResponse(
-                        request=request,
-                        name="new_order_panel.html",
-                        context=new_order_page_context(
-                            **inputs,
-                            member_balance=current_balance,
-                            balance_recharge_amount="",
-                            balance_prompt=True,
-                            balance_prompt_message="會員餘額不足，是否有充值？",
-                            balance_required_twd=total_twd,
-                            balance_shortage_twd=shortage,
-                        ),
-                        status_code=200,
+                    payload = {
+                        "openBalanceRechargeModal": {
+                            "message": "會員餘額不足，是否有充值？",
+                            "current_balance": f"{current_balance:.2f}",
+                            "required_twd": f"{total_twd:.2f}",
+                            "shortage_twd": f"{shortage:.2f}",
+                            "recharge_amount": "",
+                        }
+                    }
+                    return Response(
+                        status_code=204,
+                        headers={
+                            "HX-Trigger": json.dumps(
+                                payload,
+                                ensure_ascii=False,
+                            )
+                        },
                     )
 
                 if recharge_amount > 0:
@@ -2769,21 +2773,23 @@ def create_order(
                             total_twd - balance_after_recharge
                         ).quantize(Decimal("0.01"))
                         conn.rollback()
-                        return templates.TemplateResponse(
-                            request=request,
-                            name="new_order_panel.html",
-                            context=new_order_page_context(
-                                **inputs,
-                                member_balance=current_balance,
-                                balance_recharge_amount=str(recharge_amount),
-                                balance_prompt=True,
-                                balance_prompt_message=(
-                                    "充值後餘額仍不足，請確認充值金額。"
-                                ),
-                                balance_required_twd=total_twd,
-                                balance_shortage_twd=shortage_after,
-                            ),
-                            status_code=200,
+                        payload = {
+                            "openBalanceRechargeModal": {
+                                "message": "充值後餘額仍不足，請確認充值金額。",
+                                "current_balance": f"{current_balance:.2f}",
+                                "required_twd": f"{total_twd:.2f}",
+                                "shortage_twd": f"{shortage_after:.2f}",
+                                "recharge_amount": f"{recharge_amount:.2f}",
+                            }
+                        }
+                        return Response(
+                            status_code=204,
+                            headers={
+                                "HX-Trigger": json.dumps(
+                                    payload,
+                                    ensure_ascii=False,
+                                )
+                            },
                         )
 
                     change_member_balance(
