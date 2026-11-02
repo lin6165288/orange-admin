@@ -2627,6 +2627,34 @@ def new_order_fee(
     )
 
 
+
+def balance_recharge_modal_response(
+    request: Request,
+    *,
+    message: str,
+    current_balance: Decimal,
+    required_twd: Decimal,
+    shortage_twd: Decimal,
+    recharge_amount: str = "",
+):
+    return templates.TemplateResponse(
+        request=request,
+        name="balance_recharge_modal.html",
+        context={
+            "message": message,
+            "current_balance": current_balance,
+            "required_twd": required_twd,
+            "shortage_twd": shortage_twd,
+            "recharge_amount": recharge_amount,
+        },
+        status_code=200,
+        headers={
+            "HX-Retarget": "#balance-modal-host",
+            "HX-Reswap": "innerHTML",
+        },
+    )
+
+
 @app.post("/orders/new")
 def create_order(
     request: Request,
@@ -2744,23 +2772,13 @@ def create_order(
 
                 if shortage > 0 and recharge_amount <= 0:
                     conn.rollback()
-                    payload = {
-                        "openBalanceRechargeModal": {
-                            "message": "會員餘額不足，是否有充值？",
-                            "current_balance": f"{current_balance:.2f}",
-                            "required_twd": f"{total_twd:.2f}",
-                            "shortage_twd": f"{shortage:.2f}",
-                            "recharge_amount": "",
-                        }
-                    }
-                    return Response(
-                        status_code=204,
-                        headers={
-                            "HX-Trigger": json.dumps(
-                                payload,
-                                ensure_ascii=False,
-                            )
-                        },
+                    return balance_recharge_modal_response(
+                        request,
+                        message="會員餘額不足，是否有充值？",
+                        current_balance=current_balance,
+                        required_twd=total_twd,
+                        shortage_twd=shortage,
+                        recharge_amount="",
                     )
 
                 if recharge_amount > 0:
@@ -2773,23 +2791,13 @@ def create_order(
                             total_twd - balance_after_recharge
                         ).quantize(Decimal("0.01"))
                         conn.rollback()
-                        payload = {
-                            "openBalanceRechargeModal": {
-                                "message": "充值後餘額仍不足，請確認充值金額。",
-                                "current_balance": f"{current_balance:.2f}",
-                                "required_twd": f"{total_twd:.2f}",
-                                "shortage_twd": f"{shortage_after:.2f}",
-                                "recharge_amount": f"{recharge_amount:.2f}",
-                            }
-                        }
-                        return Response(
-                            status_code=204,
-                            headers={
-                                "HX-Trigger": json.dumps(
-                                    payload,
-                                    ensure_ascii=False,
-                                )
-                            },
+                        return balance_recharge_modal_response(
+                            request,
+                            message="充值後餘額仍不足，請確認充值金額。",
+                            current_balance=current_balance,
+                            required_twd=total_twd,
+                            shortage_twd=shortage_after,
+                            recharge_amount=f"{recharge_amount:.2f}",
                         )
 
                     change_member_balance(
