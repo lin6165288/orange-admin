@@ -109,31 +109,40 @@
             <label for="new-remarks">備註（選填）</label>
             <textarea name="remarks" id="new-remarks" rows="3" placeholder="輸入備註">{{ remarks }}</textarea>
         </div>
-        {% if balance_prompt %}
-        <div class="balance-recharge-modal-backdrop" id="balanceRechargeModal" role="dialog" aria-modal="true" aria-labelledby="balanceRechargeTitle">
+        <div
+            class="balance-recharge-modal-backdrop"
+            id="balanceRechargeModal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="balanceRechargeTitle"
+            hidden
+        >
             <div class="balance-recharge-modal">
                 <div class="balance-recharge-modal-head">
                     <div>
                         <div class="balance-recharge-kicker">VIP 儲值金扣款</div>
                         <h3 id="balanceRechargeTitle">餘額不足，是否有充值？</h3>
                     </div>
-                    <button type="button" class="balance-recharge-close" onclick="closeBalanceRechargeModal()" aria-label="關閉">×</button>
+                    <button type="button" class="balance-recharge-close"
+                            onclick="closeBalanceRechargeModal()" aria-label="關閉">×</button>
                 </div>
 
-                <p class="balance-recharge-message">{{ balance_prompt_message }}</p>
+                <p class="balance-recharge-message" id="balanceRechargeMessage">
+                    會員餘額不足，是否有充值？
+                </p>
 
                 <div class="balance-recharge-summary">
                     <div>
                         <span>目前餘額</span>
-                        <strong>NT$ {{ '%.2f'|format(member_balance|float) }}</strong>
+                        <strong id="balanceRechargeCurrent">NT$ 0.00</strong>
                     </div>
                     <div>
                         <span>本單需扣款</span>
-                        <strong>NT$ {{ '%.2f'|format(balance_required_twd|float) }}</strong>
+                        <strong id="balanceRechargeRequired">NT$ 0.00</strong>
                     </div>
                     <div class="is-shortage">
                         <span>目前尚差</span>
-                        <strong>NT$ {{ '%.2f'|format(balance_shortage_twd|float) }}</strong>
+                        <strong id="balanceRechargeShortage">NT$ 0.00</strong>
                     </div>
                 </div>
 
@@ -141,25 +150,23 @@
                     <label for="balance-recharge-amount">本次充值金額</label>
                     <div class="input-prefix">
                         <span>NT$</span>
-                        <input
-                            id="balance-recharge-amount"
-                            name="balance_recharge_amount"
-                            type="number"
-                            min="0.01"
-                            max="999999999.99"
-                            step="0.01"
-                            value="{{ balance_recharge_amount }}"
-                            placeholder="輸入會員本次實際充值金額"
-                            autofocus
-                        >
+                        <input id="balance-recharge-amount"
+                               name="balance_recharge_amount"
+                               type="number"
+                               min="0.01"
+                               max="999999999.99"
+                               step="0.01"
+                               value=""
+                               placeholder="輸入會員本次實際充值金額">
                     </div>
                     <small>
-                        有輸入金額時，新增訂單成功後會同步增加會員餘額並寫入「儲值」紀錄，再扣除此筆訂單。
+                        有輸入金額時，會先加入會員餘額並寫入充值紀錄，再扣除此筆訂單。
                     </small>
                 </div>
 
                 <div class="balance-recharge-actions">
-                    <button type="button" class="reset-button" onclick="closeBalanceRechargeModal()">
+                    <button type="button" class="reset-button"
+                            onclick="closeBalanceRechargeModal()">
                         沒有充值／返回修改
                     </button>
                     <button type="submit" class="edit-save">
@@ -169,9 +176,6 @@
                 </div>
             </div>
         </div>
-        {% else %}
-        <input type="hidden" name="balance_recharge_amount" value="">
-        {% endif %}
 
         <div class="create-footer">
             <label class="edit-checkbox"><input type="checkbox" name="keep_last_name" value="1" {% if keep_last_name %}checked{% endif %}> 新增後保留此客戶姓名</label>
@@ -181,6 +185,7 @@
 </section>
 
 <style>
+.balance-recharge-modal-backdrop[hidden]{display:none !important;}
 .balance-recharge-modal-backdrop{
     position:fixed;
     inset:0;
@@ -283,9 +288,41 @@
 <script>
 function closeBalanceRechargeModal() {
     const modal = document.getElementById('balanceRechargeModal');
-    if (modal) modal.remove();
-    const rechargeInput = document.querySelector('input[name="balance_recharge_amount"]');
+    if (modal) modal.hidden = true;
+
+    const rechargeInput = document.getElementById('balance-recharge-amount');
     if (rechargeInput) rechargeInput.value = '';
+}
+
+function openBalanceRechargeModal(detail) {
+    const modal = document.getElementById('balanceRechargeModal');
+    if (!modal) return;
+
+    const data = detail || {};
+    const message = document.getElementById('balanceRechargeMessage');
+    const current = document.getElementById('balanceRechargeCurrent');
+    const required = document.getElementById('balanceRechargeRequired');
+    const shortage = document.getElementById('balanceRechargeShortage');
+    const rechargeInput = document.getElementById('balance-recharge-amount');
+
+    if (message) message.textContent = data.message || '會員餘額不足，是否有充值？';
+    if (current) current.textContent = `NT$ ${data.current_balance || '0.00'}`;
+    if (required) required.textContent = `NT$ ${data.required_twd || '0.00'}`;
+    if (shortage) shortage.textContent = `NT$ ${data.shortage_twd || '0.00'}`;
+    if (rechargeInput) rechargeInput.value = data.recharge_amount || '';
+
+    modal.hidden = false;
+
+    setTimeout(() => {
+        if (rechargeInput) rechargeInput.focus();
+    }, 0);
+}
+
+if (!window.__orangeBalanceRechargeListenerBound) {
+    window.__orangeBalanceRechargeListenerBound = true;
+    document.body.addEventListener('openBalanceRechargeModal', function(event) {
+        openBalanceRechargeModal(event.detail);
+    });
 }
 
 function toggleCardCostField() {
