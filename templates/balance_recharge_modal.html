@@ -1,0 +1,74 @@
+<div class="balance-recharge-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="balanceRechargeTitle">
+    <div class="balance-recharge-modal">
+        <div class="balance-recharge-modal-head">
+            <div>
+                <div class="balance-recharge-kicker">VIP 儲值金扣款</div>
+                <h3 id="balanceRechargeTitle">餘額不足，是否有充值？</h3>
+            </div>
+            <button
+                type="button"
+                class="balance-recharge-close"
+                onclick="document.getElementById('balance-modal-host').innerHTML=''"
+                aria-label="關閉"
+            >×</button>
+        </div>
+
+        <p class="balance-recharge-message">{{ message }}</p>
+
+        <div class="balance-recharge-summary">
+            <div>
+                <span>目前餘額</span>
+                <strong>NT$ {{ '%.2f'|format(current_balance|float) }}</strong>
+            </div>
+            <div>
+                <span>本單需扣款</span>
+                <strong>NT$ {{ '%.2f'|format(required_twd|float) }}</strong>
+            </div>
+            <div class="is-shortage">
+                <span>目前尚差</span>
+                <strong>NT$ {{ '%.2f'|format(shortage_twd|float) }}</strong>
+            </div>
+        </div>
+
+        <div class="edit-field create-field balance-recharge-input">
+            <label for="balance-recharge-amount">本次充值金額</label>
+            <div class="input-prefix">
+                <span>NT$</span>
+                <input
+                    id="balance-recharge-amount"
+                    name="balance_recharge_amount"
+                    form="create-order-form"
+                    type="number"
+                    min="0.01"
+                    max="999999999.99"
+                    step="0.01"
+                    value="{{ recharge_amount }}"
+                    placeholder="輸入會員本次實際充值金額"
+                    autofocus
+                >
+            </div>
+            <small>
+                有輸入金額時，會先加入會員餘額並寫入充值紀錄，再扣除此筆訂單。
+            </small>
+        </div>
+
+        <div class="balance-recharge-actions">
+            <button
+                type="button"
+                class="reset-button"
+                onclick="document.getElementById('balance-modal-host').innerHTML=''"
+            >
+                沒有充值／返回修改
+            </button>
+
+            <button
+                type="submit"
+                form="create-order-form"
+                class="edit-save"
+            >
+                <i class="bi bi-wallet2"></i>
+                充值並新增訂單
+            </button>
+        </div>
+    </div>
+</div>
