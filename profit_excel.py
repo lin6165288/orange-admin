@@ -40,7 +40,7 @@ def make_profit_xlsx(rows: list[dict], start_date: str, end_date: str, rate_reco
     headers = [
         "訂單編號", "下單日期", "客戶姓名", "匯率月份", "訂單類型", "採購付款",
         "平台", "物流單號", "人民幣金額", "實際成本匯率", "實際成本(TWD)",
-        "適用定價匯率", "手續費收入", "價差利潤", "總利潤", "重量(kg)",
+        "適用定價匯率", "手續費收入", "活動折扣", "價差利潤", "總利潤", "重量(kg)",
         "是否到倉", "是否已運回", "提前運回", "訂單狀態", "備註"
     ]
 
@@ -60,7 +60,7 @@ def make_profit_xlsx(rows: list[dict], start_date: str, end_date: str, rate_reco
     )
     rows_xml.append(f'<row r="4" ht="24" customHeight="1">{header_cells}</row>')
 
-    numeric_cols = {1, 9, 10, 11, 12, 13, 14, 15, 16}
+    numeric_cols = {1, 9, 10, 11, 12, 13, 14, 15, 16, 17}
 
     for row_idx, r in enumerate(rows, start=5):
         values = [
@@ -77,6 +77,7 @@ def make_profit_xlsx(rows: list[dict], start_date: str, end_date: str, rate_reco
             r.get("cost_twd_num"),
             r.get("sell_rate_num"),
             r.get("service_fee_num"),
+            r.get("activity_discount_num"),
             r.get("rate_profit_num"),
             r.get("total_profit_num"),
             r.get("weight_num"),
@@ -106,6 +107,10 @@ def make_profit_xlsx(rows: list[dict], start_date: str, end_date: str, rate_reco
         Decimal(str(r.get("service_fee_num") or 0))
         for r in rows
     )
+    total_activity_discount = sum(
+        Decimal(str(r.get("activity_discount_num") or 0))
+        for r in rows
+    )
     total_profit = sum(
         Decimal(str(r.get("total_profit_num") or 0))
         for r in rows
@@ -115,15 +120,16 @@ def make_profit_xlsx(rows: list[dict], start_date: str, end_date: str, rate_reco
     summary_cells = [
         _inline_cell(f"A{total_row}", "合計", 4),
         _number_cell(f"M{total_row}", total_service_fee, 5),
-        _number_cell(f"N{total_row}", total_margin, 5),
-        _number_cell(f"O{total_row}", total_profit, 5),
+        _number_cell(f"N{total_row}", total_activity_discount, 5),
+        _number_cell(f"O{total_row}", total_margin, 5),
+        _number_cell(f"P{total_row}", total_profit, 5),
     ]
     rows_xml.append(
         f'<row r="{total_row}" ht="24" customHeight="1">{"".join(summary_cells)}</row>'
     )
 
     widths = [
-        12, 14, 18, 11, 12, 12, 12, 22, 14, 16, 16, 16, 14, 16, 14, 12,
+        12, 14, 18, 11, 12, 12, 12, 22, 14, 16, 16, 16, 14, 14, 16, 14, 12,
         12, 12, 12, 12, 28
     ]
     cols_xml = ''.join(

@@ -471,6 +471,28 @@ def customer_total_for_order(amount: Decimal, rate: Decimal, fee: Decimal) -> De
     )
 
 
+def parse_order_discount(value, gross_total: Decimal) -> Decimal:
+    """活動折扣：整數新台幣，且不得超過折扣前應收。"""
+    raw = str(value or "").strip()
+    if not raw:
+        return Decimal("0")
+    try:
+        discount = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=422, detail="折扣優惠金額格式不正確")
+    if not discount.is_finite() or discount < 0:
+        raise HTTPException(status_code=422, detail="折扣優惠金額不能小於 0")
+    if discount.as_tuple().exponent < 0:
+        raise HTTPException(status_code=422, detail="折扣優惠金額請輸入整數台幣")
+    discount = discount.quantize(Decimal("1"))
+    if discount > gross_total:
+        raise HTTPException(
+            status_code=422,
+            detail=f"折扣優惠金額不可超過本單折扣前應收 NT${gross_total:.0f}",
+        )
+    return discount
+
+
 def refund_order_balance_for_delete(cursor, old_order, admin_username: str):
     deducted = Decimal(str(old_order.get("balance_deducted_twd") or 0)).quantize(Decimal("0.01"))
     if deducted <= 0:
@@ -2474,6 +2496,7 @@ def add_order_context(**updates):
         "platform": "集運",
         "tracking_number": "",
         "amount_rmb": "0.00",
+        "extra_discount": "0",
         "purchase_payment_method": "alipay",
         "card_cost_twd": "",
         "customer_payment_method": "bank_transfer",
@@ -2539,11 +2562,19 @@ def new_order_page_context(**updates):
             context["platform"],
             context.get("customer_payment_method"),
         )
-        total = customer_total_for_order(amount_dec, context["current_exchange_rate"], fee)
+        gross_total = customer_total_for_order(
+            amount_dec, context["current_exchange_rate"], fee
+        )
+        activity_discount = parse_order_discount(
+            context.get("extra_discount"), gross_total
+        )
+        total = (gross_total - activity_discount).quantize(Decimal("1"))
         context.update({
             "base_fee": base,
             "calculated_fee": fee,
             "vip_discount": discount,
+            "gross_customer_total_twd": gross_total,
+            "activity_discount_twd": activity_discount,
             "customer_total_twd": total,
             "order_type_label": (
                 "代付" if is_payment_order_customer(context.get("customer_name")) else "代購"
@@ -2554,6 +2585,8 @@ def new_order_page_context(**updates):
             "base_fee": None,
             "calculated_fee": None,
             "vip_discount": None,
+            "gross_customer_total_twd": None,
+            "activity_discount_twd": None,
             "customer_total_twd": None,
         })
     return context
@@ -2572,6 +2605,7 @@ def new_order_fee(
     customer_name: str = "",
     platform: str = "集運",
     amount_rmb: str = "0",
+    extra_discount: str = "0",
     customer_payment_method: str = "bank_transfer",
     admin: str = Depends(verify_admin),
 ):
@@ -2606,7 +2640,16 @@ def new_order_fee(
     finally:
         conn.close()
     base, fee, discount = customer_fee_for_payment(amount, level, platform, method)
-    total = customer_total_for_order(amount, rate, fee)
+    gross_total = customer_total_for_order(amount, rate, fee)
+    try:
+        activity_discount = parse_order_discount(extra_discount, gross_total)
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="new_order_fee.html",
+            context={"error_message": exc.detail},
+        )
+    total = (gross_total - activity_discount).quantize(Decimal("1"))
     return templates.TemplateResponse(
         request=request,
         name="new_order_fee.html",
@@ -2619,6 +2662,8 @@ def new_order_fee(
             "customer_payment_label": CUSTOMER_PAYMENT_METHODS[method],
             "order_type_label": "代付" if is_payment_order_customer(customer_name) else "代購",
             "current_exchange_rate": rate,
+            "gross_customer_total_twd": gross_total,
+            "activity_discount_twd": activity_discount,
             "customer_total_twd": total,
             "member_balance": balance,
             "balance_enough": balance >= total,
@@ -2663,6 +2708,7 @@ def create_order(
     platform: str = Form("集運"),
     tracking_number: str = Form(""),
     amount_rmb: str = Form("0"),
+    extra_discount: str = Form("0"),
     purchase_payment_method: str = Form("alipay"),
     card_cost_twd: str = Form(""),
     customer_payment_method: str = Form("bank_transfer"),
@@ -2683,6 +2729,7 @@ def create_order(
     customer_method = normalize_customer_payment_method(customer_payment_method)
     inputs = dict(order_time=order_time, customer_name=name, platform=platform,
                   tracking_number=tracking, amount_rmb=amount_rmb,
+                  extra_discount=extra_discount,
                   purchase_payment_method=purchase_method,
                   card_cost_twd=card_cost_twd,
                   customer_payment_method=customer_method,
@@ -2761,7 +2808,17 @@ def create_order(
             original_fee, fee, discount = customer_fee_for_payment(
                 amount, level, platform, customer_method
             )
-            total_twd = customer_total_for_order(amount, rate, fee)
+            gross_total_twd = customer_total_for_order(amount, rate, fee)
+            try:
+                activity_discount = parse_order_discount(
+                    extra_discount, gross_total_twd
+                )
+            except HTTPException as exc:
+                conn.rollback()
+                return bad(exc.detail)
+            total_twd = (
+                gross_total_twd - activity_discount
+            ).quantize(Decimal("1"))
 
             if customer_method == "balance":
                 current_balance = member_balance_locked(cursor, member_id)
@@ -2818,13 +2875,13 @@ def create_order(
                     balance_deducted_twd, balance_member_id,
                     weight_kg, is_arrived, is_returned, service_fee, remarks,
                     exchange_rate, member_level_snapshot, original_service_fee,
-                    vip_discount_rate, final_service_fee)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    vip_discount_rate, final_service_fee, extra_discount)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (date_value, name, platform, tracking or None, amount,
                  purchase_method, card_cost, customer_method, rate, total_twd,
                  Decimal("0.00"), (member_id if customer_method == "balance" else None),
                  weight, int(is_arrived == "1"), int(is_returned == "1"), fee, notes or None,
-                 rate, level, original_fee, discount, fee),
+                 rate, level, original_fee, discount, fee, activity_discount),
             )
             new_id = cursor.lastrowid
 
@@ -6397,7 +6454,7 @@ def _profit_rows(start_date, end_date, rates_by_month):
                 SELECT
                     order_id, order_time, customer_name, platform, tracking_number,
                     amount_rmb, purchase_payment_method, card_cost_twd,
-                    service_fee, weight_kg, is_arrived, is_returned,
+                    service_fee, extra_discount, weight_kg, is_arrived, is_returned,
                     is_early_returned, remarks, order_status
                 FROM orders
                 WHERE order_time >= %s AND order_time <= %s
@@ -6414,6 +6471,9 @@ def _profit_rows(start_date, end_date, rates_by_month):
     for row in rows:
         amount = _profit_decimal(row.get("amount_rmb"))
         fee = _profit_decimal(row.get("service_fee")).quantize(Decimal("0.01"))
+        activity_discount = _profit_decimal(
+            row.get("extra_discount")
+        ).quantize(Decimal("0.01"))
         weight = _profit_decimal(row.get("weight_kg"))
         order_time = row.get("order_time")
         month_key = order_time.strftime("%Y-%m") if order_time else ""
@@ -6458,7 +6518,9 @@ def _profit_rows(start_date, end_date, rates_by_month):
             if cost_twd is not None:
                 sell_twd = (amount * sell_rate).quantize(Decimal("0.01"))
                 rate_profit = (sell_twd - cost_twd).quantize(Decimal("0.01"))
-                total_profit = (rate_profit + fee).quantize(Decimal("0.01"))
+                total_profit = (
+                    rate_profit + fee - activity_discount
+                ).quantize(Decimal("0.01"))
 
         item = dict(row)
         item.update({
@@ -6473,6 +6535,7 @@ def _profit_rows(start_date, end_date, rates_by_month):
             "card_cost_twd_num": card_cost,
             "cost_twd_num": cost_twd,
             "service_fee_num": fee,
+            "activity_discount_num": activity_discount,
             "weight_num": weight,
             "rmb_rate_num": rmb_rate,
             "cost_rate_num": cost_rate,
@@ -6517,6 +6580,10 @@ def _profit_context(start_date="", end_date="", rate_month="", message="", error
 
     rate_profit = sum((r["rate_profit_num"] for r in completed_rows), Decimal("0"))
     service_fee = sum((r["service_fee_num"] for r in rows), Decimal("0"))
+    activity_discount = sum(
+        (r["activity_discount_num"] for r in rows),
+        Decimal("0"),
+    )
     total_profit = sum((r["total_profit_num"] for r in completed_rows), Decimal("0"))
     payment_profit = sum((r["total_profit_num"] for r in payment_rows_complete), Decimal("0"))
     purchase_profit = sum((r["total_profit_num"] for r in purchase_rows_complete), Decimal("0"))
@@ -6537,6 +6604,7 @@ def _profit_context(start_date="", end_date="", rate_month="", message="", error
         "max_date": max_date.isoformat(),
         "rate_profit": float(rate_profit),
         "service_fee": float(service_fee),
+        "activity_discount": float(activity_discount),
         "total_profit": float(total_profit),
         "payment_count": len([r for r in rows if r["order_type"] == "代付"]),
         "purchase_count": len([r for r in rows if r["order_type"] == "代購"]),
