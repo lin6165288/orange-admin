@@ -40,6 +40,17 @@
                        hx-get="/orders/new/fee" hx-trigger="input changed delay:350ms" hx-include="#create-order-form" hx-target="#fee-preview" hx-swap="innerHTML">
             </div>
             <div class="edit-field create-field">
+                <label for="new-extra-discount">折扣優惠金額（台幣）</label>
+                <div class="input-prefix">
+                    <span>NT$</span>
+                    <input id="new-extra-discount" name="extra_discount" type="number"
+                           value="{{ extra_discount }}" min="0" step="1"
+                           placeholder="沒有優惠請填 0"
+                           hx-get="/orders/new/fee" hx-trigger="input changed delay:350ms"
+                           hx-include="#create-order-form" hx-target="#fee-preview" hx-swap="innerHTML">
+                </div>
+            </div>
+            <div class="edit-field create-field">
                 <label for="new-weight">包裹公斤數</label>
                 <input id="new-weight" name="weight_kg" type="number" value="{{ weight_kg }}" min="0" max="99999999.99" step="0.01" required>
             </div>

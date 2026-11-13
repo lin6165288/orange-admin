@@ -79,6 +79,7 @@
 <section class="profit-kpis">
   <div class="profit-kpi"><span>價差利潤</span><strong>{% if can_calculate %}NT$ {{ '{:,.2f}'.format(rate_profit) }}{% else %}待補資料{% endif %}</strong></div>
   <div class="profit-kpi"><span>手續費收入</span><strong>NT$ {{ '{:,.2f}'.format(service_fee) }}</strong></div>
+  <div class="profit-kpi"><span>活動折扣</span><strong>- NT$ {{ '{:,.2f}'.format(activity_discount) }}</strong></div>
   <div class="profit-kpi profit-kpi-main"><span>總利潤</span><strong>{% if can_calculate %}NT$ {{ '{:,.2f}'.format(total_profit) }}{% else %}待補資料{% endif %}</strong></div>
 </section>
 
@@ -99,7 +100,7 @@
   {% if rows %}
   <div class="profit-table-wrap"><table class="profit-table"><thead><tr>
     <th>訂單</th><th>日期</th><th>姓名</th><th>月份</th><th>類型</th><th>採購付款</th><th>平台</th>
-    <th>人民幣</th><th>實際成本匯率</th><th>實際成本</th><th>適用定價匯率</th><th>價差利潤</th><th>手續費</th><th>總利潤</th>
+    <th>人民幣</th><th>實際成本匯率</th><th>實際成本</th><th>適用定價匯率</th><th>價差利潤</th><th>手續費</th><th>活動折扣</th><th>總利潤</th>
   </tr></thead><tbody>
   {% for row in rows %}
   <tr class="{% if row.profit_missing %}profit-rate-missing-row{% endif %}">
@@ -125,6 +126,7 @@
     <td>{% if row.rate_missing %}—{% else %}{{ row.sell_rate_num }}{% endif %}</td>
     <td>{% if row.profit_missing %}—{% else %}NT$ {{ '%.2f'|format(row.rate_profit_num) }}{% endif %}</td>
     <td>NT$ {{ '%.2f'|format(row.service_fee_num) }}</td>
+    <td>{% if row.activity_discount_num > 0 %}- NT$ {{ '%.2f'|format(row.activity_discount_num) }}{% else %}NT$ 0.00{% endif %}</td>
     <td class="profit-total-cell">{% if row.profit_missing %}—{% else %}NT$ {{ '%.2f'|format(row.total_profit_num) }}{% endif %}</td>
   </tr>
   {% endfor %}

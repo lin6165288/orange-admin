@@ -35,6 +35,7 @@
     <div class="detail-item"><span>人民幣金額</span><strong>{% if order.amount_rmb is not none %}¥{{ order.amount_rmb }}{% else %}—{% endif %}</strong></div>
     <div class="detail-item"><span>重量</span><strong>{% if order.weight_kg is not none %}{{ order.weight_kg }} kg{% else %}—{% endif %}</strong></div>
     <div class="detail-item"><span>手續費</span><strong>{% if order.service_fee is not none %}NT$ {{ order.service_fee }}{% else %}—{% endif %}</strong></div>
+    <div class="detail-item"><span>折扣優惠</span><strong>{% if order.extra_discount and order.extra_discount|float > 0 %}- NT$ {{ '%.0f'|format(order.extra_discount|float) }}{% else %}NT$ 0{% endif %}</strong></div>
     <div class="detail-item"><span>採購付款</span><strong>{{ '刷卡' if order.purchase_payment_method == 'card' else '支付寶' }}</strong></div>
     <div class="detail-item"><span>客戶付款</span><strong>{% if order.customer_payment_method == 'bank_transfer' %}銀行轉帳{% elif order.customer_payment_method == 'balance' %}餘額扣款{% elif order.customer_payment_method == 'cod' %}貨到付款{% else %}—{% endif %}</strong></div>
     <div class="detail-item"><span>本單定價匯率</span><strong>{% if order.customer_exchange_rate is not none %}{{ order.customer_exchange_rate }}{% else %}—{% endif %}</strong></div>

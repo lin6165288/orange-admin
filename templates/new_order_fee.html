@@ -7,7 +7,9 @@
   <div><span>客戶付款</span><strong>{{ customer_payment_label or '銀行轉帳' }}</strong></div>
   <div><span>本單定價匯率</span><strong>{{ '%.4f'|format(current_exchange_rate|float) }}</strong></div>
   <div><span>本單手續費</span><strong>NT$ {{ '%.2f'|format(calculated_fee|float) }}</strong></div>
-  <div><span>本單應收台幣</span><strong>NT$ {{ '%.0f'|format(customer_total_twd|float) }}</strong></div>
+  <div><span>折扣前應收</span><strong>NT$ {{ '%.0f'|format(gross_customer_total_twd|float) }}</strong></div>
+  <div><span>活動折扣</span><strong>- NT$ {{ '%.0f'|format(activity_discount_twd|float) }}</strong></div>
+  <div><span>本單實收台幣</span><strong>NT$ {{ '%.0f'|format(customer_total_twd|float) }}</strong></div>
   {% if customer_payment_method == 'balance' %}
   <div><span>會員目前餘額</span><strong>NT$ {{ '%.2f'|format(member_balance|float) }}</strong></div>
   {% endif %}
