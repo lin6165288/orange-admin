@@ -169,7 +169,6 @@ function shipAttachReturnDate(form) {
   const value = dateInput ? dateInput.value : '';
   if (!value) {
     alert('請先選擇本次運回日期。');
-    if (dateInput) dateInput.focus();
     return false;
   }
   let hidden = form.querySelector('input[name="return_date"]');
@@ -215,7 +214,6 @@ function shipApplyCustomers() {
   const action = actionSelect ? actionSelect.value : '';
   if (!action) {
     alert('請先選擇批次操作。');
-    if (actionSelect) actionSelect.focus();
     return;
   }
   const form = document.getElementById('ship-customer-action-form');

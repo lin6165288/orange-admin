@@ -156,7 +156,35 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => normalizeIcons(document));
-  document.body.addEventListener('htmx:afterSwap', (event) => normalizeIcons(event.target));
+
+  // 全域避免 HTMX 局部更新後瀏覽器突然跳到頁面其他位置。
+  // beforeRequest 記住目前捲動位置，afterSettle 等版面完成後再恢復。
+  let htmxScrollState = null;
+
+  document.body.addEventListener('htmx:beforeRequest', () => {
+    htmxScrollState = {
+      x: window.scrollX || 0,
+      y: window.scrollY || 0
+    };
+  });
+
+  document.body.addEventListener('htmx:afterSwap', (event) => {
+    normalizeIcons(event.target);
+  });
+
+  document.body.addEventListener('htmx:afterSettle', () => {
+    if (!htmxScrollState) return;
+
+    const { x, y } = htmxScrollState;
+    htmxScrollState = null;
+
+    // 連續兩次恢復，避免圖片 / 表格 / 字型 settle 後再次改變版面高度。
+    requestAnimationFrame(() => {
+      window.scrollTo(x, y);
+      requestAnimationFrame(() => window.scrollTo(x, y));
+    });
+  });
+
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       mutation.addedNodes.forEach((node) => {
