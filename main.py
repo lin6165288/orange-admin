@@ -4387,7 +4387,7 @@ def member_detail_context(member_id: int):
                 FROM orders
                 WHERE customer_name = %s
                 ORDER BY order_time DESC, order_id DESC
-                LIMIT 50
+                LIMIT 10
                 """,
                 (member["customer_name"],),
             )
@@ -4446,7 +4446,7 @@ def member_detail_context(member_id: int):
                 FROM member_balance_logs
                 WHERE member_id = %s
                 ORDER BY log_id DESC
-                LIMIT 30
+                LIMIT 10
                 """,
                 (member_id,),
             )
