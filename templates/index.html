@@ -82,12 +82,8 @@
     <div class="card-icon"><i class="bi bi-arrow-repeat"></i></div>
     <div class="dashboard-card-copy">
       <div class="card-label">更新訂單資料</div>
-      <div class="card-value">
-        {% if orders_update_due %}
-          <span class="todo-status-danger">待更新</span>
-        {% else %}
-          <span class="todo-status-ok">今日已更新</span>
-        {% endif %}
+      <div class="card-value {% if orders_update_due %}todo-value-danger{% endif %}">
+        {% if orders_update_due %}待更新{% else %}今日已更新{% endif %}
       </div>
       <div class="card-note">目前：{{ orders_last_update_time }}</div>
     </div>
