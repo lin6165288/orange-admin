@@ -1278,7 +1278,10 @@ def dashboard_stats():
                         stats["line_bound"] / stats["total_members"] * 100.0
                     )
 
-        stats.update(dashboard_todo_snapshot(cursor))
+            # 必須在 cursor 尚未離開 with 區塊前查詢今日待辦。
+            # v3.28.2 放在 with 之後，cursor 已關閉，導致 fallback 成「尚未設定」。
+            stats.update(dashboard_todo_snapshot(cursor))
+
         return stats
     finally:
         conn.close()
@@ -1310,6 +1313,7 @@ async def dashboard_todo_count(
     return {
         "pending_total": snapshot["pending_total"],
         "orders_update_due": snapshot["orders_update_due"],
+        "orders_last_update_time": snapshot["orders_last_update_time"],
         "pending_return_requests": snapshot["pending_return_requests"],
         "pending_forwarding_registers": snapshot["pending_forwarding_registers"],
     }
