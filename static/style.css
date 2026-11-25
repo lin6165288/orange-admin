@@ -4057,3 +4057,56 @@ summary .auto-line-icon { margin-right: .42em; }
  .frontend-content-editor-form .frontend-content-desc-field,.frontend-content-editor-form .frontend-active-check,.frontend-editor-actions{grid-column:auto}
  .frontend-content-summary{align-items:flex-start}.frontend-content-side{flex-direction:column;align-items:flex-end}
 }
+
+
+/* ======================================================
+   v3.28 Dashboard pending reminders
+====================================================== */
+.menu-alert-badge{
+  margin-left:auto;
+  min-width:20px;
+  height:20px;
+  padding:0 6px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:#e05252;
+  color:#fff;
+  border:2px solid #fff;
+  font-size:10px;
+  line-height:1;
+  font-weight:800;
+  box-shadow:0 2px 6px rgba(181,58,58,.18);
+}
+.dashboard-section-head{
+  margin:28px 0 12px;
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:16px;
+}
+.dashboard-section-head h2{margin:0;font-size:20px}
+.dashboard-section-head p{margin:5px 0 0;color:#929292;font-size:13px}
+.dashboard-pending-pill,
+.dashboard-clear-pill{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  padding:6px 10px;
+  font-size:11px;
+  font-weight:700;
+  white-space:nowrap;
+}
+.dashboard-pending-pill{background:#fff0f0;color:#bd5555;border:1px solid #f0caca}
+.dashboard-clear-pill{background:#edf8f0;color:#35784a;border:1px solid #cfe8d6}
+.dashboard-grid-three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.dashboard-card-alert{border-color:#efcccc;background:linear-gradient(180deg,#fff 0%,#fffafa 100%)}
+.dashboard-card-alert .card-icon{background:#fff3f3;color:#c45151;border-color:#f0d0d0}
+.todo-status-danger{font-size:18px;color:#bd5555;font-weight:800}
+.todo-status-ok{font-size:18px;color:#35784a;font-weight:800}
+@media(max-width:900px){
+  .dashboard-grid-three{grid-template-columns:1fr}
+  .dashboard-section-head{align-items:flex-start;flex-direction:column}
+}
