@@ -1090,8 +1090,8 @@ def display_audit_value(
 # Dashboard
 # =========================================================
 
-def dashboard_todo_snapshot():
-    """回傳今日待辦：訂單更新、待處理運回申請、待處理集運登記。"""
+def dashboard_todo_snapshot(cursor=None):
+    """回傳今日待辦；可傳入既有 cursor 以避免重複建立 DB 連線。"""
     taipei_now = datetime.now(ZoneInfo("Asia/Taipei"))
     today_text = taipei_now.strftime("%Y/%m/%d")
 
@@ -1103,52 +1103,70 @@ def dashboard_todo_snapshot():
         "pending_total": 1,
     }
 
-    conn = get_db()
+    own_conn = None
+    own_cursor = None
+
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("SHOW TABLES LIKE 'site_settings'")
-            if cursor.fetchone():
-                cursor.execute(
-                    """
-                    SELECT setting_value
-                    FROM site_settings
-                    WHERE setting_key = 'orders_last_update_time'
-                    LIMIT 1
-                    """
-                )
-                row = cursor.fetchone() or {}
-                last_update = str(row.get("setting_value") or "").strip()
-                if last_update:
-                    snapshot["orders_last_update_time"] = last_update
-                    snapshot["orders_update_due"] = not last_update.startswith(today_text)
+        if cursor is None:
+            own_conn = get_db()
+            own_cursor = own_conn.cursor()
+            cursor = own_cursor
 
-            cursor.execute("SHOW TABLES LIKE 'customer_return_requests'")
-            if cursor.fetchone():
-                cursor.execute(
-                    """
-                    SELECT COUNT(*) AS cnt
-                    FROM customer_return_requests
-                    WHERE status = 'pending'
-                    """
-                )
-                snapshot["pending_return_requests"] = int(
-                    (cursor.fetchone() or {}).get("cnt") or 0
-                )
+        try:
+            cursor.execute(
+                """
+                SELECT setting_value
+                FROM site_settings
+                WHERE setting_key = 'orders_last_update_time'
+                LIMIT 1
+                """
+            )
+            row = cursor.fetchone() or {}
+            last_update = str(row.get("setting_value") or "").strip()
+            if last_update:
+                snapshot["orders_last_update_time"] = last_update
+                snapshot["orders_update_due"] = not last_update.startswith(today_text)
+        except Exception:
+            # 若舊資料庫尚無 site_settings，維持「待更新」即可。
+            pass
 
-            cursor.execute("SHOW TABLES LIKE 'customer_forwarding_registers'")
-            if cursor.fetchone():
-                cursor.execute(
-                    """
-                    SELECT COUNT(*) AS cnt
-                    FROM customer_forwarding_registers
-                    WHERE status = 'pending'
-                    """
-                )
-                snapshot["pending_forwarding_registers"] = int(
-                    (cursor.fetchone() or {}).get("cnt") or 0
-                )
+        try:
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM customer_return_requests
+                WHERE status = 'pending'
+                """
+            )
+            snapshot["pending_return_requests"] = int(
+                (cursor.fetchone() or {}).get("cnt") or 0
+            )
+        except Exception:
+            pass
+
+        try:
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM customer_forwarding_registers
+                WHERE status = 'pending'
+                """
+            )
+            snapshot["pending_forwarding_registers"] = int(
+                (cursor.fetchone() or {}).get("cnt") or 0
+            )
+        except Exception:
+            pass
+
     finally:
-        conn.close()
+        if own_cursor is not None:
+            try:
+                own_cursor.close()
+            except Exception:
+                pass
+
+        if own_conn is not None:
+            own_conn.close()
 
     snapshot["pending_total"] = (
         (1 if snapshot["orders_update_due"] else 0)
@@ -1157,8 +1175,6 @@ def dashboard_todo_snapshot():
     )
     return snapshot
 
-
-templates.env.globals["dashboard_todo_snapshot"] = dashboard_todo_snapshot
 
 
 def dashboard_stats():
@@ -1262,7 +1278,7 @@ def dashboard_stats():
                         stats["line_bound"] / stats["total_members"] * 100.0
                     )
 
-        stats.update(dashboard_todo_snapshot())
+        stats.update(dashboard_todo_snapshot(cursor))
         return stats
     finally:
         conn.close()
@@ -1283,6 +1299,20 @@ async def home(
         name="index.html",
         context=dashboard_stats()
     )
+
+
+@app.get("/api/dashboard-todo-count")
+async def dashboard_todo_count(
+    admin: str = Depends(verify_admin),
+):
+    """左側選單徽章專用；由前端背景載入，不阻塞頁面切換。"""
+    snapshot = dashboard_todo_snapshot()
+    return {
+        "pending_total": snapshot["pending_total"],
+        "orders_update_due": snapshot["orders_update_due"],
+        "pending_return_requests": snapshot["pending_return_requests"],
+        "pending_forwarding_registers": snapshot["pending_forwarding_registers"],
+    }
 
 
 # =========================================================
