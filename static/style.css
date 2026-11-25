@@ -4060,7 +4060,8 @@ summary .auto-line-icon { margin-right: .42em; }
 
 
 /* ======================================================
-   v3.28 Dashboard pending reminders
+   v3.28.2 Dashboard pending reminders
+   使用既有 dashboard 字體 / 卡片語彙
 ====================================================== */
 .menu-alert-badge{
   margin-left:auto;
@@ -4076,18 +4077,38 @@ summary .auto-line-icon { margin-right: .42em; }
   border:2px solid #fff;
   font-size:10px;
   line-height:1;
-  font-weight:800;
+  font-weight:700;
   box-shadow:0 2px 6px rgba(181,58,58,.18);
 }
+.menu-alert-badge[hidden]{
+  display:none !important;
+}
+
 .dashboard-section-head{
-  margin:28px 0 12px;
+  margin:30px 0 12px;
   display:flex;
   align-items:flex-end;
   justify-content:space-between;
   gap:16px;
+  font-family:inherit;
 }
-.dashboard-section-head h2{margin:0;font-size:20px}
-.dashboard-section-head p{margin:5px 0 0;color:#929292;font-size:13px}
+.dashboard-section-head h2{
+  margin:0;
+  color:#222;
+  font-family:inherit;
+  font-size:20px;
+  line-height:1.3;
+  font-weight:700;
+}
+.dashboard-section-head p{
+  margin:6px 0 0;
+  color:#888;
+  font-family:inherit;
+  font-size:13px;
+  line-height:1.5;
+  font-weight:400;
+}
+
 .dashboard-pending-pill,
 .dashboard-clear-pill{
   display:inline-flex;
@@ -4095,18 +4116,72 @@ summary .auto-line-icon { margin-right: .42em; }
   justify-content:center;
   border-radius:999px;
   padding:6px 10px;
+  font-family:inherit;
   font-size:11px;
-  font-weight:700;
+  line-height:1;
+  font-weight:600;
   white-space:nowrap;
 }
-.dashboard-pending-pill{background:#fff0f0;color:#bd5555;border:1px solid #f0caca}
-.dashboard-clear-pill{background:#edf8f0;color:#35784a;border:1px solid #cfe8d6}
-.dashboard-grid-three{grid-template-columns:repeat(3,minmax(0,1fr))}
-.dashboard-card-alert{border-color:#efcccc;background:linear-gradient(180deg,#fff 0%,#fffafa 100%)}
-.dashboard-card-alert .card-icon{background:#fff3f3;color:#c45151;border-color:#f0d0d0}
-.todo-status-danger{font-size:18px;color:#bd5555;font-weight:800}
-.todo-status-ok{font-size:18px;color:#35784a;font-weight:800}
+.dashboard-pending-pill{
+  background:#fff0f0;
+  color:#bd5555;
+  border:1px solid #f0caca;
+}
+.dashboard-clear-pill{
+  background:#f5f5f5;
+  color:#777;
+  border:1px solid #e7e7e7;
+}
+
+.dashboard-grid-three{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+}
+.dashboard-todo-grid{
+  margin-top:0;
+}
+
+/* 待辦卡片沿用原本 dashboard-card / card-label / card-value / card-note */
+.dashboard-todo-grid .card-label{
+  font-size:14px;
+  color:#888;
+  font-weight:400;
+}
+.dashboard-todo-grid .card-value{
+  margin-top:3px;
+  color:#222;
+  font-size:25px;
+  line-height:1.2;
+  font-weight:700;
+}
+.dashboard-todo-grid .card-value small{
+  font-size:13px;
+  color:#999;
+  font-weight:500;
+}
+.dashboard-todo-grid .card-note{
+  margin-top:5px;
+  color:#aaa;
+  font-size:12px;
+  font-weight:400;
+}
+.dashboard-card-alert{
+  border-color:#efcccc;
+}
+.dashboard-card-alert .card-icon{
+  background:#fff7ef;
+  color:#f08300;
+  border-color:#f3dfc2;
+}
+.dashboard-todo-grid .todo-value-danger{
+  color:#bd5555;
+}
+
 @media(max-width:900px){
-  .dashboard-grid-three{grid-template-columns:1fr}
-  .dashboard-section-head{align-items:flex-start;flex-direction:column}
+  .dashboard-grid-three{
+    grid-template-columns:1fr;
+  }
+  .dashboard-section-head{
+    align-items:flex-start;
+    flex-direction:column;
+  }
 }
