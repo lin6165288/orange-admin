@@ -63,5 +63,56 @@
     </div>
     <i class="bi bi-chevron-right dashboard-card-arrow"></i>
   </a>
+
+<div class="dashboard-section-head">
+  <div>
+    <h2>今日待處理</h2>
+    <p>首頁會自動整理前台申請與訂單資料更新狀態。</p>
+  </div>
+  {% if pending_total > 0 %}
+  <span class="dashboard-pending-pill">{{ pending_total }} 待處理</span>
+  {% else %}
+  <span class="dashboard-clear-pill">目前無待辦</span>
+  {% endif %}
+</div>
+
+<div class="dashboard-grid dashboard-grid-three dashboard-todo-grid">
+  <a class="dashboard-card dashboard-card-link {% if orders_update_due %}dashboard-card-alert{% endif %}" href="/frontend-settings">
+    <div class="card-icon"><i class="bi bi-arrow-repeat"></i></div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">更新訂單資料</div>
+      <div class="card-value">
+        {% if orders_update_due %}
+          <span class="todo-status-danger">待更新</span>
+        {% else %}
+          <span class="todo-status-ok">今日已更新</span>
+        {% endif %}
+      </div>
+      <div class="card-note">目前：{{ orders_last_update_time }}</div>
+    </div>
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+
+  <a class="dashboard-card dashboard-card-link {% if pending_return_requests > 0 %}dashboard-card-alert{% endif %}" href="/shipping/requests?status=pending">
+    <div class="card-icon"><i class="bi bi-box-arrow-left"></i></div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">前台運回申請</div>
+      <div class="card-value">{{ pending_return_requests }} <small>筆</small></div>
+      <div class="card-note">尚未處理</div>
+    </div>
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+
+  <a class="dashboard-card dashboard-card-link {% if pending_forwarding_registers > 0 %}dashboard-card-alert{% endif %}" href="/forwarding-registers?status=pending">
+    <div class="card-icon"><i class="bi bi-box-arrow-in-right"></i></div>
+    <div class="dashboard-card-copy">
+      <div class="card-label">集運登記</div>
+      <div class="card-value">{{ pending_forwarding_registers }} <small>筆</small></div>
+      <div class="card-note">尚未處理</div>
+    </div>
+    <i class="bi bi-chevron-right dashboard-card-arrow"></i>
+  </a>
+</div>
+
 </div>
 {% endblock %}

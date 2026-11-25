@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/static/style.css?v=30">
 </head>
 <body>
+{% set nav_todo = dashboard_todo_snapshot() %}
 <div class="app">
     <aside class="sidebar">
         <div class="brand">
@@ -23,6 +24,11 @@
                 <a class="menu-item {% if request.url.path == '/' %}active{% endif %}" href="/" title="儀表板">
                     <span class="menu-icon"><i class="bi bi-grid-1x2"></i></span>
                     <span class="menu-label">儀表板</span>
+                    {% if nav_todo.pending_total > 0 %}
+                    <span class="menu-alert-badge" title="目前有 {{ nav_todo.pending_total }} 個待處理事項">
+                        {{ nav_todo.pending_total if nav_todo.pending_total < 100 else '99+' }}
+                    </span>
+                    {% endif %}
                 </a>
             </div>
 
